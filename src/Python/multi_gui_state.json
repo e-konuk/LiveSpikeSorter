@@ -1,16 +1,16 @@
 {
     "num_sorters": 1,
     "base_paths": [
-        "C:\\Users\\Spike Sorter\\OSSExperiments\\260325_train_g0"
+        "C:\\Users\\Spike Sorter\\OSSExperiments\\260514_train_g0"
     ],
     "ks_output_dirs": [
-        "C:\\Users\\Spike Sorter\\OSSExperiments\\260325_train_g0\\oss_training"
+        "C:\\Users\\Spike Sorter\\OSSExperiments\\260514_train_g0\\oss_training"
     ],
     "bin_files": [
-        "C:\\Users\\Spike Sorter\\OSSExperiments\\260325_train_g0\\260325_train_g0_imec0\\260325_train_g0_t0.imec0.ap.bin"
+        "C:\\Users\\Spike Sorter\\OSSExperiments\\260514_train_g0\\260514_train_g0_imec0\\260514_train_g0_t0.imec0.ap.bin"
     ],
     "meta_files": [
-        "C:\\Users\\Spike Sorter\\OSSExperiments\\260325_train_g0\\260325_train_g0_imec0\\260325_train_g0_t0.imec0.ap.meta"
+        "C:\\Users\\Spike Sorter\\OSSExperiments\\260514_train_g0\\260514_train_g0_imec0\\260514_train_g0_t0.imec0.ap.meta"
     ],
     "chanmap_files": [
         "C:\\Users\\Spike Sorter\\OSSExperiments\\channel_maps\\neuropixels_NHP_channel_map_dev_staggered_v1.mat"

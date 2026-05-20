@@ -19,6 +19,7 @@
 #include <thread>
 #include "../Helpers/Timer.h"
 #include <fstream>
+#include <experimental/filesystem>
 
 #ifdef WINDOWS
 #include <windows.h>
@@ -268,7 +269,7 @@ OnlineSpikesV2::OnlineSpikesV2(
 	W(params.iMinScanWindow + params.iMaxScanWindow),
 	rootMeanSquared(0),
 	ossOutputDir(params.sOSSOutputFolder),
-	spikesFileOut(ossOutputDir + "spikeOutput.txt"),
+	spikesFileOut(),
 	recordingOffset(0),
 	substream(params.iSubstream),
 	lookback(0) // this will be set when we read in M
@@ -320,7 +321,36 @@ OnlineSpikesV2::~OnlineSpikesV2()
 
 void OnlineSpikesV2::initializeSorter(InputParameters params) {
 	static const char* ptLabel = { "OnlineSpikesV2::initializeSorter" };
-	std::cout << "Writing spikes to " << ossOutputDir << "spikeOutput.txt" << std::endl;
+	// Ensure output directory exists and open the spike output file
+	{
+		namespace fs = std::experimental::filesystem;
+		fs::path outputDir(ossOutputDir);
+		if (!ossOutputDir.empty() && !fs::exists(outputDir)) {
+			std::cout << "Creating output directory: " << ossOutputDir << std::endl;
+			fs::create_directories(outputDir);
+		}
+
+		std::string spikesFilePath = ossOutputDir + "spikeOutput.txt";
+
+		// If a previous spikeOutput.txt exists, rename it with an incremented suffix
+		if (fs::exists(spikesFilePath)) {
+			int suffix = 1;
+			std::string renamedPath;
+			do {
+				renamedPath = ossOutputDir + "spikeOutput_" + std::to_string(suffix) + ".txt";
+				suffix++;
+			} while (fs::exists(renamedPath));
+			std::cout << "Renaming existing " << spikesFilePath << " -> " << renamedPath << std::endl;
+			fs::rename(spikesFilePath, renamedPath);
+		}
+
+		spikesFileOut.open(spikesFilePath);
+		if (!spikesFileOut.is_open()) {
+			std::cerr << "ERROR: Failed to open spike output file: " << spikesFilePath << std::endl;
+			throw std::runtime_error("Failed to open spike output file: " + spikesFilePath);
+		}
+		std::cout << "Writing spikes to " << spikesFilePath << std::endl;
+	}
 
 	// Set CUDA device to the one that was chosen
 	setDevice(params.uSelectedDevice, &cudnnConvObj);
@@ -1117,10 +1147,21 @@ float OnlineSpikesV2::P2P_calc(float *input, long length) {
 void OnlineSpikesV2::writeSpikesToFile(std::vector<long> times, std::vector<long> templates, std::vector<float> amplitudes) {
 	static const char *ptLabel = { "OnlineSpikesV2::writeSpikesToFile" };
 
-	for (int i = 0; i < times.size() && i < templates.size(); i++) {
-		spikesFileOut << recordingOffset + times[i] << "," << templates[i] 
-			<< "," << amplitudes[i] << "," << closest_y[i] << std::endl;
+	if (!spikesFileOut.is_open() || spikesFileOut.fail()) {
+		std::cerr << "WARNING: Spike output file is not writable, attempting to reopen..." << std::endl;
+		spikesFileOut.clear();
+		spikesFileOut.open(ossOutputDir + "spikeOutput.txt", std::ios::app); // append to avoid clobbering current run's data
+		if (!spikesFileOut.is_open()) {
+			std::cerr << "ERROR: Could not reopen spike output file!" << std::endl;
+			return;
+		}
 	}
+
+	for (int i = 0; i < times.size() && i < templates.size(); i++) {
+		spikesFileOut << recordingOffset + times[i] << "," << templates[i]
+			<< "," << amplitudes[i] << "," << closest_y[i] << "\n";
+	}
+	spikesFileOut.flush();
 }
 
 template <class T>

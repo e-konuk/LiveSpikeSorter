@@ -1,4 +1,5 @@
 import sys
+import pathlib
 from pathlib import Path
 from crop_methods import crop_kilosort_output, parse_bin_meta_file
 import kilosort
@@ -411,8 +412,13 @@ def run_online_multi():
             arguments['--sdm_baseline_min_seconds'] = SDM_BASELINE_MIN_SECONDS[sdm_idx]
         if SDM_TRIGGER_BIN_MS[sdm_idx]:
             arguments['--sdm_trigger_bin_ms'] = SDM_TRIGGER_BIN_MS[sdm_idx]
+   
 
-    cmd = [r"C:\Users\Spike Sorter\source\repos\OnlineSpikes_v2\x64\RELEASE\OnlineSpikes.exe"]
+    script_dir = pathlib.Path(__file__).parent.resolve()
+    # Go back exactly two levels to reach the project root and build path to executable 
+    exe_path = script_dir.parent.parent / "x64" / "RELEASE" / "OnlineSpikes.exe"
+    # Ex: cmd = [r"C:\Users\moorelab\source\repos\LiveSpikeSorter_Remote\x64\RELEASE\OnlineSpikes.exe"]
+    cmd = [str(exe_path)]
     for k, v in arguments.items():
         if isinstance(v, list):
             cmd.append(k)

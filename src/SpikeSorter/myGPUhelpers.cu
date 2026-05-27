@@ -1,5 +1,6 @@
 ﻿
 #include "myGPUhelpers.h"
+#include <algorithm>
 #include <iostream>
 #include "../Helpers/Utils.h"
 #include <device_functions.h>
@@ -422,11 +423,15 @@ __global__ void find_matching_indices_kernel(const float* __restrict__ d_Cfmaxpo
 	int T, int W,
 	long* __restrict__ out,
 	int N,
+	int max_out,
 	int* __restrict__ globalCount)
 {
 	// Optionally load d_Cfmaxpool into shared memory if it fits.
+	// Gate the WRITE on the same condition as the READ below so we never
+	// touch shared memory when the launch reserved zero bytes for it.
 	extern __shared__ float s_Cfmaxpool[];
-	if (threadIdx.x < W)
+	const bool use_shared = (W <= blockDim.x);
+	if (use_shared && threadIdx.x < W)
 	{
 		s_Cfmaxpool[threadIdx.x] = d_Cfmaxpool[threadIdx.x];
 	}
@@ -454,14 +459,18 @@ __global__ void find_matching_indices_kernel(const float* __restrict__ d_Cfmaxpo
 				// Get the corresponding d_Cfmaxpool value.
 				// If W is small (fits in shared memory), use shared memory.
 				// Otherwise, use __ldg to prefetch via the read-only cache.
-				float cfmax_val = (W <= blockDim.x) ? s_Cfmaxpool[samp] : __ldg(&d_Cfmaxpool[samp]);
+				float cfmax_val = use_shared ? s_Cfmaxpool[samp] : __ldg(&d_Cfmaxpool[samp]);
 
 				// Check the predicate: compare (nearly equal) and ensure cfmax_val >= Th.
 				if (fabsf(cfmax_val - cf_val) < 0.0001f && cfmax_val >= Th)
 				{
-					// Write out the index atomically.
+					// Reserve a slot, then only write if it fits. globalCount
+					// still increments past max_out so the host can detect
+					// overflow; the surplus matches are discarded.
 					int pos = atomicAdd(globalCount, 1);
-					out[pos] = i;
+					if (pos < max_out) {
+						out[pos] = i;
+					}
 				}
 			}
 		}
@@ -878,8 +887,16 @@ void findMatchingIndices(const float* d_Cfmaxpool,
 	// Total number of elements in d_Cf.
 	int N = T * currBatchNumSamples;
 
-	// Allocate (or resize) the output vector to hold up to N indices.
-	matching_indices.resize(currBatchNumSamples / M);
+	// Allocate the output vector. The theoretical maximum is one match per
+	// M-sample window (currBatchNumSamples / M), but floating-point ties
+	// between templates and edge effects can produce more. Use a generous
+	// 8x slack with a 1024 floor so the bounds check inside the kernel never
+	// has to discard matches under realistic neural data.
+	const long mClamped = (M > 0) ? M : 1;
+	const int max_matches = std::max<int>(
+		1024,
+		static_cast<int>(8 * (currBatchNumSamples / mClamped + 1)));
+	matching_indices.resize(max_matches);
 
 	// Allocate a device counter and initialize it to zero.
 	cudaMemset(d_count, 0, sizeof(int));
@@ -901,14 +918,23 @@ void findMatchingIndices(const float* d_Cfmaxpool,
 		T, currBatchNumSamples,
 		d_out,
 		N,
+		max_matches,
 		d_count);
 	_CUDA_CALL(cudaDeviceSynchronize()); // (For debugging; remove in production)
 
-	// Copy the global counter back to host.
+	// Copy the global counter back to host. This is the raw atomicAdd total,
+	// which may exceed max_matches if there was overflow inside the kernel.
 	int h_count = 0;
 	cudaMemcpy(&h_count, d_count, sizeof(int), cudaMemcpyDeviceToHost);
 
-	// Resize the matching_indices vector to the number of matching indices found.
+	// Clamp to the actual number of indices written into the buffer.
+	if (h_count > max_matches) {
+		std::cerr << "find_matching_indices: " << h_count
+		          << " matches found but buffer holds " << max_matches
+		          << "; surplus discarded. Consider raising the bound."
+		          << std::endl;
+		h_count = max_matches;
+	}
 	matching_indices.resize(h_count);
 }
 

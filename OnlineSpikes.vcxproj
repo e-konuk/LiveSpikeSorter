@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -40,6 +40,13 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+
+  <PropertyGroup>
+  <PythonRoot Condition="'$(PythonRoot)' == '' AND '$(PYTHON310)' != ''">$(PYTHON310)</PythonRoot>
+  <PythonRoot Condition="'$(PythonRoot)' == ''">$([MSBuild]::GetRegistryValueFromView('HKEY_CURRENT_USER\Software\Python\PythonCore\3.10\InstallPath', null, null, RegistryView.Registry64, RegistryView.Registry32))</PythonRoot>
+  <PythonRoot Condition="'$(PythonRoot)' == ''">$([MSBuild]::GetRegistryValueFromView('HKEY_LOCAL_MACHINE\Software\Python\PythonCore\3.10\InstallPath', null, null, RegistryView.Registry64, RegistryView.Registry32))</PythonRoot>
+</PropertyGroup>
+
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
     <LibraryPath>$(LibraryPath)</LibraryPath>
@@ -55,7 +62,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN64;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\Spike Sorter\AppData\Local\Programs\Python\Python310\Lib\site-packages\numpy\core\include;C:\Users\Spike Sorter\AppData\Local\Programs\Python\Python310\include;C:\mlpack\armadillo\include;C:\mlpack\mlpack\src;C:\mlpack\mlpack\deps\ensmallen\include;C:\mlpack\mlpack\deps\cereal\include;$(ProjectDir)/External;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(PythonRoot)Lib\site-packages\numpy\core\include;$(PythonRoot)include;C:\mlpack\armadillo\include;C:\mlpack\mlpack\src;C:\mlpack\mlpack\deps\ensmallen\include;C:\mlpack\mlpack\deps\cereal\include;$(ProjectDir)/External;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <ShowIncludes>false</ShowIncludes>
@@ -64,13 +71,16 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
       <AdditionalDependencies>cublas.lib;cudnn.lib;ws2_32.lib;npps.lib;d3d12.lib;dxgi.lib;libSglxApi.a;cusolver.lib;cudart.lib;cufft.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>C:\Users\Spike Sorter\AppData\Local\Programs\Python\Python310\libs;$(SolutionDir)\External\sglx;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(PythonRoot)libs;$(SolutionDir)\External\sglx;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <UACExecutionLevel>HighestAvailable</UACExecutionLevel>
     </Link>
     <PostBuildEvent>
-      <Command>echo copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"
-copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
+    <Command>echo copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"
+copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"
+echo copy "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll" "$(OutDir)"
+copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
+
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
     </CudaCompile>
@@ -79,7 +89,7 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <PreprocessorDefinitions>WIN64;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>C:\Users\Spike Sorter\AppData\Local\Programs\Python\Python310\Lib\site-packages\numpy\core\include;C:\Users\Spike Sorter\AppData\Local\Programs\Python\Python310\include;C:\mlpack\armadillo\include;C:\mlpack\mlpack\src;C:\mlpack\mlpack\deps\ensmallen\include;C:\mlpack\mlpack\deps\cereal\include;$(ProjectDir)/External;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(PythonRoot)Lib\site-packages\numpy\core\include;$(PythonRoot)include;C:\mlpack\armadillo\include;C:\mlpack\mlpack\src;C:\mlpack\mlpack\deps\ensmallen\include;C:\mlpack\mlpack\deps\cereal\include;$(ProjectDir)/External;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <ShowIncludes>false</ShowIncludes>
@@ -98,16 +108,19 @@ copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
       <AdditionalDependencies>cublas.lib;cudnn.lib;ws2_32.lib;npps.lib;d3d12.lib;dxgi.lib;libSglxApi.a;cusolver.lib;cudart.lib;cufft.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>C:\Users\Spike Sorter\AppData\Local\Programs\Python\Python310\libs;$(SolutionDir)\External\sglx;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(PythonRoot)libs;$(SolutionDir)\External\sglx;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <UACExecutionLevel>HighestAvailable</UACExecutionLevel>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <LinkTimeCodeGeneration>UseFastLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <PostBuildEvent>
-      <Command>echo copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"
-copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"</Command>
-    </PostBuildEvent>
+    <Command>echo copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"
+copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"
+echo copy "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll" "$(OutDir)"
+copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll" "$(OutDir)"</Command>
+</PostBuildEvent>
+
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <FastMath>true</FastMath>

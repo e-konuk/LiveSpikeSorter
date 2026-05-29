@@ -55,6 +55,8 @@ InputGUI::InputGUI(InputParameters cmdLineParams)
 		? Params.sDecoderWorkFolder + "log.txt"
 		: cmdLineParams.sLogFile;
 
+	Params.iMaxVramMB = cmdLineParams.iMaxVramMB;
+
 	Params.sdmIP = cmdLineParams.sdmIP;
 	Params.sdmPort = cmdLineParams.sdmPort;
 	Params.vSdmActivitySubset = cmdLineParams.vSdmActivitySubset;
@@ -274,6 +276,12 @@ void InputGUI::gatherGPUParameters() {
 	}
 
 	Params.vSelectedDevices = newSelectedDevices;
+
+	ImGui::Separator();
+	ImGui::Text("VRAM Cap (MB):"); ImGui::SameLine();
+	HelpMarker("0 = no cap (default). Set to e.g. 6144 to simulate a 6 GB GPU: a ballast buffer will consume the difference at startup so real OOM occurs if the sorter over-allocates.");
+	ImGui::InputInt("##VramCap", &Params.iMaxVramMB, 256, 1024);
+	if (Params.iMaxVramMB < 0) Params.iMaxVramMB = 0;
 }
 
 void InputGUI::gatherSpikeSorterParameters() {

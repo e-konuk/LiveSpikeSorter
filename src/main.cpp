@@ -222,6 +222,14 @@ InputParameters parseCmdArgs(int argc, char* argv[]) {
 			}
 			cmdLineParams.sdmDecoderWindowMs = std::stoi(argv[i + 1]);
 		}
+		else if (arg == "--vram_cap") {
+			if (i + 1 >= argc) {
+				std::cout << "Must supply integer (MB) after --vram_cap" << std::endl;
+				exit(EXIT_SUCCESS);
+			}
+			cmdLineParams.iMaxVramMB = std::stoi(argv[i + 1]);
+			std::cout << "VRAM cap set to " << cmdLineParams.iMaxVramMB << " MB" << std::endl;
+		}
 	}
 	
 	// second pass through for args that depend on some other args

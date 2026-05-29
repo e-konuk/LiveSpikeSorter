@@ -71,5 +71,8 @@ struct InputParameters {
 								bSmallskip;
 
 	uint16_t					sdmPort{};
+
+	// GPU resource throttle — 0 = no cap
+	int							iMaxVramMB{ 0 };
 };
 #endif

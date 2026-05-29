@@ -131,5 +131,8 @@ private:
 
 	// Thrust vector for matching to find local maxima, change later to normal device vector
 	thrust::device_vector<long> d_spikeIndices;
+	
+	// Ballast buffer: consumes VRAM up-front to simulate a lower-memory GPU
+	char* d_vramBallast = nullptr;
 };
 

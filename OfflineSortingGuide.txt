@@ -10,7 +10,7 @@ to sort and a Windows machine with a CUDA-capable GPU to run the sorter on.
   A -- One-Time Machine Setup
 ================================================================================
 
-You only need to do these steps once per machine. Skip to A7 if all your 
+You only need to do these steps once per machine. Skip to A6 if all your 
 prerequisites are installed. Skip to PART B if your machine is already set up. 
 
 
@@ -48,32 +48,14 @@ After downloading the cuDNN zip from NVIDIA:
   - Copy lib\x64\*.lib   to C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.3\lib\x64\
 
 
-A4. INSTALL PYTHON 3.10 + REQUIRED PACKAGES
---------------------------------------------------------------------------------
-Install Python 3.10 from python.org 
-
-  - At install time, leave "Add Python to PATH" checked.
-
-Then install the Python packages LSS uses:
-
-  py -3.10 -m pip install numpy scipy scikit-learn matplotlib h5py
-  py -3.10 -m pip install pyqtgraph PyQt5
-  py -3.10 -m pip install spikeinterface probeinterface
-  py -3.10 -m pip install torch==1.12.0+cu113 -f https://download.pytorch.org/whl/torch_stable.html
-
-Kilosort4 itself: install the lab's modified fork. LSS reads several tensors 
-(Wall3.npy, ctc.npy, wPCA.npy, preclustered_template_waveforms.npy, 
-cluster_centroids_pca.npy, ...) that only the modified fork emits.
-
-
-A5. CLONE THE LSS REPO
+A4. CLONE THE LSS REPO
 --------------------------------------------------------------------------------
 Clone the LSS repo somewhere convenient. Conventional location:
 
   C:\Users\<you>\source\repos\LiveSpikeSorter\
 
 
-A6. INSTALL SpikeGLX
+A5. INSTALL SpikeGLX
 --------------------------------------------------------------------------------
 SpikeGLX is an external dependency, downloaded separately
 
@@ -82,6 +64,25 @@ SpikeGLX is an external dependency, downloaded separately
   - The extracted files contain two executables: SpikeGLX_STD.exe (needs NI-DAQmx 
     drivers) and SpikeGLX_STD_NISIM.exe (no NI dependency). For offline replay 
     with no NI hardware, you want SpikeGLX_STD_NISIM.exe
+
+
+A6. INSTALL PYTHON 3.10 + ENVIRONMENT SETUP
+--------------------------------------------------------------------------------
+Install Python 3.10 from python.org 
+
+  - At install time, leave "Add Python to PATH" checked.
+
+Then create a virtual environment:
+  py -3.10 -m venv venv
+  venv\Scripts\activate
+
+Install the Python packages LSS uses:
+
+  pip install kilosort==4.0.13
+  pip install torch==1.12.0+cu113 -f https://download.pytorch.org/whl/torch_stable.html
+  pip install "numpy<2" scipy scikit-learn matplotlib h5py
+  pip install spikeinterface probeinterface
+  pip install pyqtgraph PyQt5
 
 
 A7. BUILD LSS (Release | x64)

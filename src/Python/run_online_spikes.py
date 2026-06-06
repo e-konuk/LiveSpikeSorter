@@ -2,6 +2,7 @@ import sys
 import pathlib
 from pathlib import Path
 from crop_methods import crop_kilosort_output, parse_bin_meta_file
+from subset_templates import subset_oss_input_inplace
 import kilosort
 import numpy as np
 import torch
@@ -45,6 +46,7 @@ bin_file_vars, meta_file_vars, chanmap_file_vars = [], [], []
 rerun_ks_vars, sdm_vars = [], []
 sdm_ip_vars, sdm_port_vars = [], []
 sdm_subset_vars, sdm_trigger_z_vars, sdm_baseline_min_seconds_vars, sdm_trigger_bin_ms_vars = [], [], [], []
+max_templates_vars = []
 file_frames, sdm_frames = [], []
 
 # Hints dictionary
@@ -54,7 +56,13 @@ HINTS = {
     "BIN": "The location of your recording (.bin file).",
     "META": "The location of your recording's metadata (.meta file).",
     "CHANMAP": "The location of your probe's channel map (.mat file).",
-    "SDM": "Send decoder output to stimulus display machine?"
+    "SDM": "Send decoder output to stimulus display machine?",
+    "MAX_TEMPLATES": ("Limit how many preclustered templates the sorter uses "
+                      "(0 = use all). Fewer templates = less GPU work in "
+                      "matchingPursuit = better real-time performance on low-spec "
+                      "GPUs, at some loss of detection. Applied to oss_input every "
+                      "launch. NOTE: values below the final-cluster count require "
+                      "the rebuilt engine with the closestCluster fix.")
 }
 
 def show_hint(key):
@@ -105,7 +113,7 @@ def update_tabs():
                     meta_file_vars, chanmap_file_vars, rerun_ks_vars,
                     sdm_vars, sdm_ip_vars, sdm_port_vars,
                     sdm_subset_vars, sdm_trigger_z_vars, sdm_baseline_min_seconds_vars, sdm_trigger_bin_ms_vars,
-                    file_frames, sdm_frames):
+                    max_templates_vars, file_frames, sdm_frames):
             del lst[n:]
 
     # Append new entries if increasing
@@ -123,6 +131,7 @@ def update_tabs():
         sdm_trigger_z_vars.append(tk.StringVar(value="1.0"))
         sdm_baseline_min_seconds_vars.append(tk.StringVar(value="10.0"))
         sdm_trigger_bin_ms_vars.append(tk.StringVar(value="100"))
+        max_templates_vars.append(tk.StringVar(value="0"))
         file_frames.append(None)
         sdm_frames.append(None)
 
@@ -157,6 +166,18 @@ def build_tab(frame, idx):
     ).grid(row=row, column=2)
     tk.Button(
         frame, text="?", command=lambda i=idx: show_hint("KS_OUTPUT"), width=3
+    ).grid(row=row, column=3)
+    row += 1
+
+    # Max templates (0 = use all)
+    tk.Label(frame, text="Max templates (0 = all):").grid(
+        row=row, column=0, padx=5, pady=5, sticky="w"
+    )
+    tk.Entry(frame, textvariable=max_templates_vars[idx], width=10).grid(
+        row=row, column=1, sticky="w"
+    )
+    tk.Button(
+        frame, text="?", command=lambda i=idx: show_hint("MAX_TEMPLATES"), width=3
     ).grid(row=row, column=3)
     row += 1
 
@@ -327,6 +348,7 @@ def main():
             sdm_trigger_z_vars[i].set(state.get("sdm_trigger_zs", ["1.0"] * num_sorters_var.get())[i])
             sdm_baseline_min_seconds_vars[i].set(state.get("sdm_baseline_min_seconds", ["10.0"] * num_sorters_var.get())[i])
             sdm_trigger_bin_ms_vars[i].set(state.get("sdm_trigger_bin_ms", ["50"] * num_sorters_var.get())[i])
+            max_templates_vars[i].set(state.get("max_templates", ["0"] * num_sorters_var.get())[i])
 
     create_finish_widgets()
     root.mainloop()
@@ -350,6 +372,7 @@ def run_online_multi():
     SDM_TRIGGER_ZS = [v.get().strip() for v in sdm_trigger_z_vars]
     SDM_BASELINE_MIN_SECONDS = [v.get().strip() for v in sdm_baseline_min_seconds_vars]
     SDM_TRIGGER_BIN_MS = [v.get().strip() for v in sdm_trigger_bin_ms_vars]
+    MAX_TEMPLATES = [v.get().strip() for v in max_templates_vars]
 
     # Save current state
     state = {
@@ -366,7 +389,8 @@ def run_online_multi():
         "sdm_subsets": SDM_SUBSETS,
         "sdm_trigger_zs": SDM_TRIGGER_ZS,
         "sdm_baseline_min_seconds": SDM_BASELINE_MIN_SECONDS,
-        "sdm_trigger_bin_ms": SDM_TRIGGER_BIN_MS
+        "sdm_trigger_bin_ms": SDM_TRIGGER_BIN_MS,
+        "max_templates": MAX_TEMPLATES
     }
     try:
         with open(STATE_FILE, "w") as f:
@@ -376,7 +400,8 @@ def run_online_multi():
 
     # Curate OSS input dirs
     OSS_DIRS = curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
-                                     META_FILES, CHANMAP_FILES, RERUN_FLAGS)
+                                     META_FILES, CHANMAP_FILES, RERUN_FLAGS,
+                                     MAX_TEMPLATES)
 
     # Build and run C++ command
     decoder_input_dirs = [bp / 'decoder_input' for bp in BASE_PATHS]
@@ -487,7 +512,8 @@ def cluster_centroids_pca_compute(templates, Wall, pc_feature_ind):
     return centroids
 
 def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
-                         META_FILES, CHANMAP_FILES, RERUN_FLAGS):
+                         META_FILES, CHANMAP_FILES, RERUN_FLAGS,
+                         MAX_TEMPLATES=None):
     OSS_DIRS = []
     for i, base in enumerate(BASE_PATHS):
         ks_out = KS_OUTPUT_DIRS[i]
@@ -580,6 +606,15 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
             f.write(f"numNearestChans:{ops['settings']['nearest_chans']}\n")
             f.write(f"Th_learned:{ops['Th_learned']}\n")
             f.write(f"duplicate_spike_bins:{ops['duplicate_spike_bins']}\n")
+
+        # Optionally subset preclustered templates for lower-spec GPUs
+        try:
+            n_keep = int(MAX_TEMPLATES[i]) if MAX_TEMPLATES else 0
+        except (ValueError, TypeError):
+            n_keep = 0
+        if n_keep > 0:
+            subset_oss_input_inplace(oss_in, n_keep, metric="spikes", allow_below_t=True)
+
         OSS_DIRS.append(str(oss_in) + '\\')
     return OSS_DIRS
 

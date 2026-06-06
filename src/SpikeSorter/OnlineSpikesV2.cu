@@ -1088,7 +1088,8 @@ int OnlineSpikesV2::closestCluster(const float x, const float y)
 	float min = FLT_MAX;
 	int minInd = -1;
 
-	for (int t = 0; t < unclu_T; t++) {
+	// Scan over the FINAL-cluster centroids, xs/ys come from cluster_centroids.npy
+	for (int t = 0; t < (long)xs.size(); t++) {
 		float dist = sqrt((x - xs[t]) * (x - xs[t]) + (y - ys[t]) * (y - ys[t]));
 		if (dist < min) {
 			min = dist;

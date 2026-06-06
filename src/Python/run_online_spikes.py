@@ -61,8 +61,7 @@ HINTS = {
                       "(0 = use all). Fewer templates = less GPU work in "
                       "matchingPursuit = better real-time performance on low-spec "
                       "GPUs, at some loss of detection. Applied to oss_input every "
-                      "launch. NOTE: values below the final-cluster count require "
-                      "the rebuilt engine with the closestCluster fix.")
+                      "launch.")
 }
 
 def show_hint(key):

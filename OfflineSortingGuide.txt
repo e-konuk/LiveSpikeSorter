@@ -140,6 +140,9 @@ A GUI appears. For each sorter/probe, fill in:
   - Bin File        The .ap.bin from your training recording
   - Meta File       The matching .ap.meta
   - Channel Map     If using a custom probe layout
+  - Max templates:  Caps the amount of templates LSS can use for low-spec GPUS
+                    Discarding starts with least active templates (by spike 
+                    count). Set to 0 by default to use all templates
   - SDM settings    IP/port for stimulus display machine, if sending decoder
                     Feedback
  

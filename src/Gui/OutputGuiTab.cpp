@@ -2,7 +2,8 @@
 
 #include <ImGUI/implot.h>
 #include <ImGUI/implot_internal.h>
-
+extern ImGuiID g_spikeStatsDockNode;
+extern ImGuiID g_rasterDockNode;
 #include "../Helpers/GuiHelpers.h"
 #include "../Networking/sorterParameters.h"
 #include "../Networking/onlineSpikesPayload.h"
@@ -211,7 +212,7 @@ void OutputGuiTab::DrawImGUI(const ImVec2 windowCenter) {
 	// Gui state
 	static bool showRaster = true;
 	static bool showNeuronInfo = true;
-	static bool showProcessTimes = false;
+	static bool showProcessTimes = true;
 	static bool showVRMS = false;
 	static bool showP2P = false;
 	static bool showTrialInfo = true;
@@ -249,19 +250,24 @@ void OutputGuiTab::DrawImGUI(const ImVec2 windowCenter) {
 
 
 void OutputGuiTab::plotRaster(const ImVec2 windowCenter, bool &showRaster) {
-	ImGui::SetNextWindowPos(windowCenter, ImGuiCond_Once, ImVec2(0.5f, 0.5f));
-	ImGui::SetNextWindowSize(ImVec2(800, 360), ImGuiCond_Once);
+	if (g_rasterDockNode != 0)
+		ImGui::SetNextWindowDockID(g_rasterDockNode, ImGuiCond_Always);
 
 	ImGui::SetNextWindowClass(&plotWindowClass);
-	ImGui::Begin("Raster Plot", &showRaster);
-	static int	  history = 5; // Seconds
 
+	// Check Begin() return value: returns false when the window is collapsed.
+	// All ImPlot calls must be skipped in that case — calling EndPlot() without
+	// a successful BeginPlot() corrupts ImPlot's context and triggers a GPU TDR crash.
+	if (!ImGui::Begin("Raster Plot", &showRaster)) {
+		ImGui::End();
+		return;
+	}
+
+	static int	  history = 5; // Seconds
 	ImGui::InputInt("History (s):", &history, 1, 10);
 	history = max(1, history); // TODO clampedInput
 
 	static std::vector<long> yVal;
-	//std::atomic<long long> max_vSpikesSize = 0;
-
 	int size;
 
 	// Compute the history window size (in streamSampleCounts)
@@ -270,86 +276,70 @@ void OutputGuiTab::plotRaster(const ImVec2 windowCenter, bool &showRaster) {
 	// startingStreamSampleCt is the left most stream sample count that will be plotted in the raster
 	long startingStreamSampleCt = streamSampleCt - window;
 
-	//std::cout << "window = " << window << "\n"
-	//	<< "streamSampleCt = " << streamSampleCt << "\n";
 	if (streamSampleCt < window) { // Start of run edge case (No scrolling because looking at a time window < window)
-		// Set Axis limits
 		ImPlot::SetNextAxisToFit(ImAxis_X1);
-		ImPlot::SetNextAxisLimits(ImAxis_Y1, m_iMinNeuronIndex - 0.5, m_lT - 0.5, ImPlotCond_Always); 
+		ImPlot::SetNextAxisLimits(ImAxis_Y1, m_iMinNeuronIndex - 0.5, m_lT - 0.5, ImPlotCond_Always);
 
-		ImPlot::BeginPlot("Raster plot:", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText | ImPlotFlags_NoTitle);
-		ImPlot::SetupAxes("Time (stream sample counts)", "Neuron");
+		if (ImPlot::BeginPlot("Raster plot:", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText | ImPlotFlags_NoTitle)) {
+			ImPlot::SetupAxes("Time (stream sample counts)", "Neuron");
 
-		for (int i = 0; i < m_lT; i++) {
-			std::lock_guard<std::mutex> lock(m_bNeurons[i]->spikeTimeMutex);
-			// If neuron has no spikes continue to next neuron
-			if (m_bNeurons[i]->m_vSpikeTime.empty())
-				continue;
+			for (int i = 0; i < m_lT; i++) {
+				std::lock_guard<std::mutex> lock(m_bNeurons[i]->spikeTimeMutex);
+				if (m_bNeurons[i]->m_vSpikeTime.empty())
+					continue;
 
-			// Create a y vector for PlotScatter()
-			size = m_bNeurons[i]->m_vSpikeTime.size();
-			yVal = std::vector<long>(size, m_bNeurons[i]->m_inumber);
-			ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 0.8F, ImVec4(0.26f, 0.59f, 0.98f, 0.78f), IMPLOT_AUTO, ImVec4(0.26f, 0.59f, 0.98f, 0.78f));
-			ImPlot::PlotScatter(("N" + std::to_string(i)).c_str(), m_bNeurons[i]->m_vSpikeTime.data(), yVal.data(), size);
+				size = m_bNeurons[i]->m_vSpikeTime.size();
+				yVal = std::vector<long>(size, m_bNeurons[i]->m_inumber);
+				ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 0.8F, ImVec4(0.26f, 0.59f, 0.98f, 0.78f), IMPLOT_AUTO, ImVec4(0.26f, 0.59f, 0.98f, 0.78f));
+				ImPlot::PlotScatter(("N" + std::to_string(i)).c_str(), m_bNeurons[i]->m_vSpikeTime.data(), yVal.data(), size);
+			}
+
+			ImPlot::EndPlot();
 		}
-
-		ImPlot::EndPlot();
-		ImGui::End();
-	} 
+	}
 	else { // Non-edge case behavior (Scrolling raster of size window)
 		ImPlot::SetNextAxisLimits(ImAxis_X1, startingStreamSampleCt, startingStreamSampleCt + window, ImPlotCond_Always);
 		ImPlot::SetNextAxisLimits(ImAxis_Y1, m_iMinNeuronIndex - 0.5, m_lT - 0.5, ImPlotCond_Always);  // TODO, allow to look at more specific neurons
 
-		ImPlot::BeginPlot("Raster plot:", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText | ImPlotFlags_NoTitle);
-		ImPlot::SetupAxes("Time (stream sample counts)", "Neuron");
+		if (ImPlot::BeginPlot("Raster plot:", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText | ImPlotFlags_NoTitle)) {
+			ImPlot::SetupAxes("Time (stream sample counts)", "Neuron");
 
-		for (int i = 0; i < m_lT; i++) {
-			std::lock_guard<std::mutex> lock(m_bNeurons[i]->spikeTimeMutex);
+			for (int i = 0; i < m_lT; i++) {
+				std::lock_guard<std::mutex> lock(m_bNeurons[i]->spikeTimeMutex);
+				if (m_bNeurons[i]->m_vSpikeTime.empty())
+					continue;
 
-			// If neuron has no spikes continue to next neuron
-			if (m_bNeurons[i]->m_vSpikeTime.empty())
-				continue;
-
-
-			// Find index of first element in m_vSpikeTimes that occurs after startingStreamSampleCt
-			int startingIndex = -1;
-			if (m_bNeurons[i]->m_vSpikeTime[0] > startingStreamSampleCt) { // If first spike in bounds, all in bounds
-				startingIndex = 0;
-			}
-			else {
-				for (int j = m_bNeurons[i]->m_vSpikeTime.size() - 1; j >= 0; j--) { // Iterate backwards for efficiency (avoid counting over all spikes)
-					if (m_bNeurons[i]->m_vSpikeTime[j] < startingStreamSampleCt) {
-						startingIndex = j + 1;
-						break;
+				// Find index of first element in m_vSpikeTimes that occurs after startingStreamSampleCt
+				int startingIndex = -1;
+				if (m_bNeurons[i]->m_vSpikeTime[0] > startingStreamSampleCt) { // If first spike in bounds, all in bounds
+					startingIndex = 0;
+				}
+				else {
+					for (int j = m_bNeurons[i]->m_vSpikeTime.size() - 1; j >= 0; j--) { // Iterate backwards for efficiency
+						if (m_bNeurons[i]->m_vSpikeTime[j] < startingStreamSampleCt) {
+							startingIndex = j + 1;
+							break;
+						}
 					}
 				}
+
+				if (startingIndex == -1)
+					continue;
+
+				std::vector<long> windowSpikesTimes(m_bNeurons[i]->m_vSpikeTime.begin() + startingIndex, m_bNeurons[i]->m_vSpikeTime.end());
+
+				size = windowSpikesTimes.size();
+				yVal = std::vector<long>(size, i);
+
+				ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 0.8F, ImVec4(0.26f, 0.59f, 0.98f, 0.78f), IMPLOT_AUTO, ImVec4(0.26f, 0.59f, 0.98f, 0.78f));
+				ImPlot::PlotScatter(("N" + std::to_string(i)).c_str(), windowSpikesTimes.data(), yVal.data(), size);
 			}
 
-			// Continue if no spikes to plot
-			if (startingIndex == -1)
-				continue;
-
-
-			std::vector<long> windowSpikesTimes(m_bNeurons[i]->m_vSpikeTime.begin() + startingIndex, m_bNeurons[i]->m_vSpikeTime.end()); // TODO lots of error messages from here
-			//m_bNeurons[i]->m_vSpikeTime = std::move(windowSpikesTimes);
-			//if (m_bNeurons[i]->m_vSpikeTime.size() > max_vSpikesSize) max_vSpikesSize = m_bNeurons[i]->m_vSpikeTime.size();
-
-			// Subtract the startingStreamSampleCt from the spike times to stop the plot from "moving right"
-			//for (long& val : windowSpikesTimes)
-			//	val -= startingStreamSampleCt;
-
-			// Create a y vector for PlotScatter()
-			size = windowSpikesTimes.size();
-			yVal = std::vector<long>(size, i);
-
-			ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 0.8F, ImVec4(0.26f, 0.59f, 0.98f, 0.78f), IMPLOT_AUTO, ImVec4(0.26f, 0.59f, 0.98f, 0.78f));
-			ImPlot::PlotScatter(("N" + std::to_string(i)).c_str(), windowSpikesTimes.data(), yVal.data(), size);
+			ImPlot::EndPlot();
 		}
-
-		//std::cout << "max = " << max_vSpikesSize << std::endl;
-		ImPlot::EndPlot();
-		ImGui::End();
 	}
+
+	ImGui::End();
 }
 
 void OutputGuiTab::displayNeuronInfo(const ImVec2 windowCenter, bool &showNeuronInfo) {
@@ -383,19 +373,19 @@ void OutputGuiTab::plotVRMS(const ImVec2 windowCenter, bool &showVRMS) {
 	ImGui::SetNextWindowPos(windowCenter, ImGuiCond_Once, ImVec2(0.5f, 0.5f));
 	ImGui::SetNextWindowSize(ImVec2(500, 360), ImGuiCond_Once);
 	ImGui::SetNextWindowClass(&plotWindowClass);
-	ImGui::Begin("VRMS over time", &showVRMS);
+	if (!ImGui::Begin("VRMS over time", &showVRMS)) { ImGui::End(); return; }
 
 	static int history = 1000;
 	ImGui::InputInt("History (s):", &history, 50, 500);
 
 	double *PlotArray = m_vdVRMS.data();
 	int ToShow = (history > m_vdVRMS.size()) ? m_vdVRMS.size() : history;
-
 	PlotArray += m_vdVRMS.size() - ToShow;
 
-	ImPlot::BeginPlot("VRMS vs. Time", ImVec2(-1, -1));
-	ImPlot::PlotLine("VRMS", PlotArray, ToShow);
-	ImPlot::EndPlot();
+	if (ImPlot::BeginPlot("VRMS vs. Time", ImVec2(-1, -1))) {
+		ImPlot::PlotLine("VRMS", PlotArray, ToShow);
+		ImPlot::EndPlot();
+	}
 	ImGui::End();
 }
 
@@ -403,27 +393,27 @@ void OutputGuiTab::plotP2P(const ImVec2 windowCenter, bool &showP2P) {
 	ImGui::SetNextWindowPos(windowCenter, ImGuiCond_Once, ImVec2(0.5f, 0.5f));
 	ImGui::SetNextWindowSize(ImVec2(500, 360), ImGuiCond_Once);
 	ImGui::SetNextWindowClass(&plotWindowClass);
-	ImGui::Begin("P2P over time", &showP2P);
+	if (!ImGui::Begin("P2P over time", &showP2P)) { ImGui::End(); return; }
 
 	static int history = 1000;
 	ImGui::InputInt("History (s):", &history, 2, 60);
 
 	float *PlotArray = m_vfP2P.data();
 	int ToShow = (history > m_vfP2P.size()) ? m_vfP2P.size() : history;
-
 	PlotArray += m_vfP2P.size() - ToShow;
 
-	ImPlot::BeginPlot("P2P vs. Time", ImVec2(-1, -1));
-	ImPlot::PlotLine("P2P", PlotArray, ToShow);
-	ImPlot::EndPlot();
+	if (ImPlot::BeginPlot("P2P vs. Time", ImVec2(-1, -1))) {
+		ImPlot::PlotLine("P2P", PlotArray, ToShow);
+		ImPlot::EndPlot();
+	}
 	ImGui::End();
 }
 
 void OutputGuiTab::plotProcessTimes(const ImVec2 windowCenter, bool &showProcessTimes) {
-	ImGui::SetNextWindowPos(windowCenter, ImGuiCond_Once, ImVec2(0.5f, 0.5f));
-	ImGui::SetNextWindowSize(ImVec2(500, 400), ImGuiCond_Once);
+	ImGui::SetNextWindowPos(windowCenter, ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
+	ImGui::SetNextWindowSize(ImVec2(500, 400), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowClass(&plotWindowClass);
-	ImGui::Begin("Processing time distribution", &showProcessTimes);
+	if (!ImGui::Begin("Processing time distribution", &showProcessTimes)) { ImGui::End(); return; }
 
 	static bool	  useFullHistory = true;
 	static int	  history = 30; // Seconds
@@ -440,7 +430,6 @@ void OutputGuiTab::plotProcessTimes(const ImVec2 windowCenter, bool &showProcess
 
 	processingTimeMutex.lock();
 	int len = m_vProcessTimes.size();
-
 	int toShow = useFullHistory || (historyNBatches > len) ? len : historyNBatches;
 	int toSkip = len - toShow;
 
@@ -466,15 +455,16 @@ void OutputGuiTab::plotProcessTimes(const ImVec2 windowCenter, bool &showProcess
 
 	ImGui::Text("Mean: %.2f,  STD: %.2f, Percentage on time: %.2f", mean, stdDev, inTimePerc);
 
-	ImPlot::BeginPlot("Batch Processing Time Distribution", ImVec2(-1, -1));
-	ImPlot::SetupAxes("Time (ms)", "Density", ImPlotAxisFlags_AutoFit);
-	ImPlot::SetupLegend(ImPlotLocation_NorthEast);
-	ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
-	processingTimeMutex.lock();
-	ImPlot::PlotHistogram("ProcessTimes", m_vProcessTimes.data() + toSkip, toShow, bins, false, true, ImPlotRange(0, range));
-	processingTimeMutex.unlock();
-	ImPlot::PlotVLines("Batch Size", &maxScanWindow, 1);
-	ImPlot::EndPlot();
+	if (ImPlot::BeginPlot("Batch Processing Time Distribution", ImVec2(-1, -1))) {
+		ImPlot::SetupAxes("Time (ms)", "Density", ImPlotAxisFlags_AutoFit);
+		ImPlot::SetupLegend(ImPlotLocation_NorthEast);
+		ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
+		processingTimeMutex.lock();
+		ImPlot::PlotHistogram("ProcessTimes", m_vProcessTimes.data() + toSkip, toShow, bins, false, true, ImPlotRange(0, range));
+		processingTimeMutex.unlock();
+		ImPlot::PlotVLines("Batch Size", &maxScanWindow, 1);
+		ImPlot::EndPlot();
+	}
 	ImGui::End();
 }
 
@@ -546,11 +536,13 @@ void Neuron::Update(OutputGuiTab* outputGUI) {
 	static std::thread CrossCorrThread;
 
 	if (IsSelected() == true) {
-		ImGui::SetNextWindowSize(ImVec2(400, 600), ImGuiCond_Once);
+		ImGui::SetNextWindowSize(ImVec2(400, 600), ImGuiCond_FirstUseEver);
 
-		//Begin widget
+		if (g_spikeStatsDockNode != 0)
+			ImGui::SetNextWindowDockID(g_spikeStatsDockNode, ImGuiCond_Always);
+
 		std::string txt = "Spike " + std::to_string(m_inumber) + " Stats";
-		ImGui::Begin(txt.c_str(), &m_bSelected);
+		if (!ImGui::Begin(txt.c_str(), &m_bSelected)) { ImGui::End(); return; }
 
 		txt = " FR: " + std::_Floating_to_string("%.2f", GetSpikeRate()) + "Hz, nSpikes: " + std::to_string(GetTotSpikeCount());
 		ImGui::Text(txt.c_str());

@@ -2,6 +2,14 @@
 #include <ImGUI/imgui_stdlib.h>
 #include <ImGUI/implot.h>
 #include <ImGUI/implot_internal.h>
+#include <wincodec.h>
+#pragma comment(lib, "windowscodecs.lib")
+
+static void LoadIconTexture();
+static void BuildDockLayout(ImGuiID dockspace_id);
+
+ImGuiID g_spikeStatsDockNode = 0; 
+ImGuiID g_rasterDockNode = 0;
 
 #include "../Helpers/TimeHelpers.h"
 #include "../Helpers/GuiHelpers.h"
@@ -44,8 +52,8 @@ Gui::Gui(InputParameters cmdLineParams):
 		exit(1);
 	}
 
-	// Show the window
-	::ShowWindow(hwnd, SW_SHOWDEFAULT);
+	// Show the window maximized
+	::ShowWindow(hwnd, SW_SHOWMAXIMIZED);
 	::UpdateWindow(hwnd);
 
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;       // Enable Keyboard Controls
@@ -73,10 +81,14 @@ Gui::Gui(InputParameters cmdLineParams):
 		DXGI_FORMAT_R8G8B8A8_UNORM, g_pd3dSrvDescHeap,
 		g_pd3dSrvDescHeap->GetCPUDescriptorHandleForHeapStart(),
 		g_pd3dSrvDescHeap->GetGPUDescriptorHandleForHeapStart());
+
+	LoadIconTexture();
 };
 
 Gui::~Gui() {
 	WaitForLastSubmittedFrame();
+
+	if (g_iconTexture) { g_iconTexture->Release(); g_iconTexture = nullptr; }
 
 	// Cleanup
 	ImGui_ImplDX12_Shutdown();
@@ -129,17 +141,73 @@ void Gui::plotOutputs(sockaddr_in mainAddr, long m_lMaxScanWind, long m_lSpikeRa
 	
 	outputGUI.setupOutput(mainAddr, m_lMaxScanWind, m_lSpikeRateWindow, isDecoding);
 
+	// Pin ini next to the exe so layout persists regardless of working directory
+	static char s_iniPath[MAX_PATH];
+	{
+		wchar_t buf[MAX_PATH];
+		GetModuleFileNameW(NULL, buf, MAX_PATH);
+		WideCharToMultiByte(CP_UTF8, 0, buf, -1, s_iniPath, MAX_PATH, NULL, NULL);
+		char* slash = strrchr(s_iniPath, '\\');
+		if (slash) strcpy(slash + 1, "imgui_lss.ini");
+	}
+	io.IniFilename = s_iniPath;
+
+	const bool hasIni = (GetFileAttributesA(io.IniFilename) != INVALID_FILE_ATTRIBUTES);
+
 	// OutputGUI's Main loop
 	while (true)
 	{
+		// Skip GPU work when the OS window is minimized — avoids DXGI waitable stall
+		if (::IsIconic(hwnd)) {
+			::Sleep(16);
+			MSG msg;
+			while (::PeekMessage(&msg, NULL, 0U, 0U, PM_REMOVE)) {
+				::TranslateMessage(&msg);
+				::DispatchMessage(&msg);
+				if (msg.message == WM_QUIT) exit(0);
+			}
+			continue;
+		}
+
 		// Handle poll events and start frame
 		beginFrame();
 
 		// Enable the dockspace
-		ImGui::DockSpaceOverViewport(ImGui::GetMainViewport());
+		ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(ImGui::GetMainViewport());
+
+		// Build default layout once, only when no saved ini exists
+		static bool layoutApplied = false;
+		if (!hasIni && !layoutApplied)
+		{
+			ImGuiDockNode* root = ImGui::DockBuilderGetNode(dockspace_id);
+			if (root != nullptr)
+			{
+				BuildDockLayout(dockspace_id);
+				layoutApplied = true;
+			}
+		}
+
+		// Recover dock node IDs when layout restored from ini
+		if (g_rasterDockNode == 0)
+		{
+			ImGuiWindow* w = ImGui::FindWindowByName("Raster Plot");
+			if (w && w->DockId != 0) g_rasterDockNode = w->DockId;
+		}
+		if (g_spikeStatsDockNode == 0)
+		{
+			for (int i = 0; i < 1024; ++i)
+			{
+				std::string name = "Spike " + std::to_string(i) + " Stats";
+				ImGuiWindow* w = ImGui::FindWindowByName(name.c_str());
+				if (w && w->DockId != 0) { g_spikeStatsDockNode = w->DockId; break; }
+			}
+		}
+
 
 		// outputGUI function
 		outputGUI.Render(windowCenter);
+
+		RenderIconWindow();
 
 		endFrame(clear_color, io);
 	}
@@ -213,6 +281,232 @@ void Gui::endFrame(ImVec4 &clear_color, ImGuiIO &io) {
 	frameCtx->FenceValue = fenceValue;
 }
 
+// ---------------------------------------------------------------------------
+// Icon helpers
+// ---------------------------------------------------------------------------
+
+// =============================================================================
+// First-run default layout configuration
+// These values only apply when no imgui_lss.ini exists next to the exe.
+// Delete imgui_lss.ini to force a reset to these defaults.
+//
+// Layout produced by the values below:
+//
+//  |<----------- LEFT_COL (55%) ----------->|<---- right (45%) ---->|
+//  +----------------------------------------+-----------------------+
+//  |                                        |                       |
+//  |         Raster Plot                    |   Processing Times    |
+//  |       (LEFT_RASTER: 75% tall)          | (RIGHT_TOP: 50% tall) |
+//  |                                        +-----------------------+
+//  +-------------------+--------------------+                       |
+//  |   LSS Icon        |   Neurons          |   Spike 0 Stats       |
+//  | (ICON_DISPLAY_W)  |   (remainder)      | (RIGHT_TOP: 50% tall) |
+//  +-------------------+--------------------+-----------------------+
+//
+// To move a window to a different slot, swap its string in BuildDockLayout below.
+// =============================================================================
+
+// Left column width as a fraction of the total screen width (0–1)
+static constexpr float LAYOUT_LEFT_COL_FRAC  = 0.55f;
+// Raster plot height as a fraction of the left column height (0–1)
+static constexpr float LAYOUT_LEFT_RASTER_FRAC = 0.75f;
+// Processing-time panel height as a fraction of the right column height (0–1)
+static constexpr float LAYOUT_RIGHT_TOP_FRAC = 0.50f;
+// Icon panel width in pixels — drives the icon/neurons split in the bottom strip
+static constexpr float ICON_DISPLAY_W        = 100.0f;
+// Icon panel height in pixels (floating fallback only; docked height follows the split)
+static constexpr float ICON_DISPLAY_H        = 100.0f;
+
+static void LoadIconTexture()
+{
+	// Path: <repo>\src\Gui\LSS_icon_JPEG_June8.jpg
+	wchar_t exePath[MAX_PATH];
+	GetModuleFileNameW(NULL, exePath, MAX_PATH);
+	std::wstring path(exePath);
+	for (int i = 0; i < 3; ++i)
+		path = path.substr(0, path.find_last_of(L'\\'));
+	path += L"\\src\\Gui\\LSS_icon";
+
+	CoInitializeEx(NULL, COINIT_MULTITHREADED);
+
+	IWICImagingFactory* wicFactory = nullptr;
+	if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+		IID_PPV_ARGS(&wicFactory)))) return;
+
+	IWICBitmapDecoder* decoder = nullptr;
+	if (FAILED(wicFactory->CreateDecoderFromFilename(path.c_str(), nullptr, GENERIC_READ,
+		WICDecodeMetadataCacheOnLoad, &decoder))) { wicFactory->Release(); return; }
+
+	IWICBitmapFrameDecode* frame = nullptr;
+	decoder->GetFrame(0, &frame);
+
+	IWICFormatConverter* converter = nullptr;
+	wicFactory->CreateFormatConverter(&converter);
+	converter->Initialize(frame, GUID_WICPixelFormat32bppRGBA,
+		WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom);
+
+	UINT w, h;
+	converter->GetSize(&w, &h);
+	g_iconWidth = (int)w; g_iconHeight = (int)h;
+
+	UINT srcPitch = w * 4;
+	std::vector<BYTE> pixels(srcPitch * h);
+	converter->CopyPixels(nullptr, srcPitch, srcPitch * h, pixels.data());
+	converter->Release(); frame->Release(); decoder->Release(); wicFactory->Release();
+
+	D3D12_RESOURCE_DESC texDesc = {};
+	texDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	texDesc.Width = w; texDesc.Height = h;
+	texDesc.DepthOrArraySize = 1; texDesc.MipLevels = 1;
+	texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	texDesc.SampleDesc.Count = 1; texDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+	D3D12_HEAP_PROPERTIES defaultHeap = { D3D12_HEAP_TYPE_DEFAULT };
+	if (FAILED(g_pd3dDevice->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,
+		&texDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&g_iconTexture))))
+	{
+		std::cerr << "[Icon] CreateCommittedResource (texture) failed\n";
+		return;
+	}
+
+	UINT64 uploadPitch = (srcPitch + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1u)
+		& ~(UINT64)(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1u);
+	D3D12_RESOURCE_DESC uploadDesc = {};
+	uploadDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	uploadDesc.Width = uploadPitch * h; uploadDesc.Height = 1;
+	uploadDesc.DepthOrArraySize = 1; uploadDesc.MipLevels = 1;
+	uploadDesc.Format = DXGI_FORMAT_UNKNOWN; uploadDesc.SampleDesc.Count = 1;
+	uploadDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+	D3D12_HEAP_PROPERTIES uploadHeap = { D3D12_HEAP_TYPE_UPLOAD };
+	ID3D12Resource* uploadBuf = nullptr;
+	if (FAILED(g_pd3dDevice->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE,
+		&uploadDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&uploadBuf))))
+	{
+		std::cerr << "[Icon] CreateCommittedResource (upload) failed\n";
+		g_iconTexture->Release(); g_iconTexture = nullptr;
+		return;
+	}
+
+	void* mapped = nullptr; D3D12_RANGE readRange = { 0, 0 };
+	if (FAILED(uploadBuf->Map(0, &readRange, &mapped)))
+	{
+		std::cerr << "[Icon] Map failed\n";
+		uploadBuf->Release(); g_iconTexture->Release(); g_iconTexture = nullptr;
+		return;
+	}
+	for (UINT y = 0; y < h; ++y)
+		memcpy((BYTE*)mapped + y * uploadPitch, pixels.data() + y * srcPitch, srcPitch);
+	uploadBuf->Unmap(0, nullptr);
+
+	ID3D12CommandAllocator* cmdAlloc = nullptr;
+	ID3D12GraphicsCommandList* cmdList = nullptr;
+	if (FAILED(g_pd3dDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&cmdAlloc))))
+	{
+		std::cerr << "[Icon] CreateCommandAllocator failed\n";
+		uploadBuf->Release(); g_iconTexture->Release(); g_iconTexture = nullptr;
+		return;
+	}
+	if (FAILED(g_pd3dDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+		cmdAlloc, nullptr, IID_PPV_ARGS(&cmdList))))
+	{
+		std::cerr << "[Icon] CreateCommandList failed\n";
+		cmdAlloc->Release(); uploadBuf->Release();
+		g_iconTexture->Release(); g_iconTexture = nullptr;
+		return;
+	}
+
+	D3D12_TEXTURE_COPY_LOCATION dst = {}, src = {};
+	dst.pResource = g_iconTexture; dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+	src.pResource = uploadBuf; src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+	src.PlacedFootprint.Footprint = { DXGI_FORMAT_R8G8B8A8_UNORM, w, h, 1, (UINT)uploadPitch };
+	cmdList->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+
+	D3D12_RESOURCE_BARRIER barrier = {};
+	barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+	barrier.Transition.pResource = g_iconTexture;
+	barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+	barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+	barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+	cmdList->ResourceBarrier(1, &barrier);
+	cmdList->Close();
+
+	ID3D12CommandList* lists[] = { cmdList };
+	g_pd3dCommandQueue->ExecuteCommandLists(1, lists);
+	ID3D12Fence* fence = nullptr; HANDLE evt = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+	g_pd3dDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
+	g_pd3dCommandQueue->Signal(fence, 1);
+	if (fence->GetCompletedValue() < 1) { fence->SetEventOnCompletion(1, evt); WaitForSingleObject(evt, INFINITE); }
+	CloseHandle(evt); fence->Release(); cmdList->Release(); cmdAlloc->Release(); uploadBuf->Release();
+
+	SIZE_T incr = g_pd3dDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+	D3D12_CPU_DESCRIPTOR_HANDLE srvCpu = g_pd3dSrvDescHeap->GetCPUDescriptorHandleForHeapStart();
+	srvCpu.ptr += incr;
+	g_iconSrvGpuHandle = g_pd3dSrvDescHeap->GetGPUDescriptorHandleForHeapStart();
+	g_iconSrvGpuHandle.ptr += incr;
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+	srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	srvDesc.Texture2D.MipLevels = 1;
+	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	g_pd3dDevice->CreateShaderResourceView(g_iconTexture, &srvDesc, srvCpu);
+}
+
+static void BuildDockLayout(ImGuiID dockspace_id)
+{
+	ImGuiViewport* vp = ImGui::GetMainViewport();
+	ImGui::DockBuilderRemoveNode(dockspace_id);
+	ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+	ImGui::DockBuilderSetNodeSize(dockspace_id, vp->Size);
+
+	// Step 1: split screen left / right
+	ImGuiID left, right;
+	ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Left, LAYOUT_LEFT_COL_FRAC, &left, &right);
+
+	// Step 2: split left column top (raster) / bottom strip (icon + neurons)
+	ImGuiID top_left, bot_left;
+	ImGui::DockBuilderSplitNode(left, ImGuiDir_Up, LAYOUT_LEFT_RASTER_FRAC, &top_left, &bot_left);
+
+	// Step 3: split bottom strip left (icon) / right (neurons)
+	ImGuiID icon_node, neurons_node;
+	float iconRatio = ImClamp(ICON_DISPLAY_W / (vp->Size.x * LAYOUT_LEFT_COL_FRAC), 0.1f, 0.5f);
+	ImGui::DockBuilderSplitNode(bot_left, ImGuiDir_Left, iconRatio, &icon_node, &neurons_node);
+
+	// Step 4: split right column top (processing times) / bottom (spike stats)
+	ImGuiID top_right, bot_right;
+	ImGui::DockBuilderSplitNode(right, ImGuiDir_Up, LAYOUT_RIGHT_TOP_FRAC, &top_right, &bot_right);
+
+	// Assign windows to slots — change the string to move a window elsewhere
+	ImGui::DockBuilderDockWindow("Raster Plot",                  top_left);
+	ImGui::DockBuilderDockWindow("LSS Icon",                     icon_node);
+	ImGui::DockBuilderDockWindow("Neurons",                      neurons_node);
+	ImGui::DockBuilderDockWindow("Processing time distribution", top_right);
+	ImGui::DockBuilderFinish(dockspace_id);
+
+	g_rasterDockNode = top_left;
+	g_spikeStatsDockNode = bot_right;
+}
+
+void Gui::RenderIconWindow()
+{
+	if (!g_iconTexture) return;
+
+	const float aspect = (float)g_iconWidth / (float)g_iconHeight;
+	ImGui::SetNextWindowSize(ImVec2(ICON_DISPLAY_W, ICON_DISPLAY_H), ImGuiCond_FirstUseEver);
+	ImGui::Begin("LSS Icon", nullptr,
+		ImGuiWindowFlags_NoTitleBar        |
+		ImGuiWindowFlags_NoScrollbar       |
+		ImGuiWindowFlags_NoScrollWithMouse |
+		ImGuiWindowFlags_NoBringToFrontOnFocus);
+
+	ImVec2 avail = ImGui::GetContentRegionAvail();
+	float drawW = avail.x, drawH = drawW / aspect;
+	if (drawH > avail.y) { drawH = avail.y; drawW = drawH * aspect; }
+	ImGui::SetCursorPos(ImVec2((avail.x - drawW) * 0.5f, (avail.y - drawH) * 0.5f));
+	ImGui::Image((ImTextureID)g_iconSrvGpuHandle.ptr, ImVec2(drawW, drawH));
+	ImGui::End();
+}
+
+// ---------------------------------------------------------------------------
+
 bool CreateDeviceD3D(HWND hWnd)
 {
 	// Setup swap chain
@@ -280,7 +574,7 @@ bool CreateDeviceD3D(HWND hWnd)
 	{
 		D3D12_DESCRIPTOR_HEAP_DESC desc = {};
 		desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-		desc.NumDescriptors = 1;
+		desc.NumDescriptors = 2; // slot 0: ImGui font, slot 1: icon texture
 		desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
 		if (g_pd3dDevice->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&g_pd3dSrvDescHeap)) != S_OK)
 			return false;

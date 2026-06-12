@@ -129,8 +129,10 @@ B3. RUN KILOSORT 4 TO PRODUCE TEMPLATES
 LSS does not learn templates online. You must run Kilosort4 on the recording 
 first to produce templates, the whitening matrix, drift matrices, etc.
 
+(Ensure your environment is activated venv\Scripts\activate)
+
   cd <repo>\src\Python
-  py -3.10 run_online_spikes.py
+  python run_online_spikes.py
 
 A GUI appears. For each sorter/probe, fill in:
 
@@ -144,7 +146,7 @@ A GUI appears. For each sorter/probe, fill in:
                     Discarding starts with least active templates (by spike 
                     count). Set to 0 by default to use all templates
   - SDM settings    IP/port for stimulus display machine, if sending decoder
-                    Feedback
+                    feedback
  
 Check "Re-run Kilosort4" and let it run. Monitor progress in the terminal.
 

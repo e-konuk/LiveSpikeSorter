@@ -2,7 +2,7 @@ import sys
 import pathlib
 from pathlib import Path
 from crop_methods import crop_kilosort_output, parse_bin_meta_file
-from subset_templates import subset_oss_input_inplace
+from subset_templates import subset_oss_input_inplace, parse_channel_range
 import kilosort
 import numpy as np
 import torch
@@ -47,6 +47,7 @@ rerun_ks_vars, sdm_vars = [], []
 sdm_ip_vars, sdm_port_vars = [], []
 sdm_subset_vars, sdm_trigger_z_vars, sdm_baseline_min_seconds_vars, sdm_trigger_bin_ms_vars = [], [], [], []
 max_templates_vars = []
+channel_range_vars = []
 file_frames, sdm_frames = [], []
 
 # Hints dictionary
@@ -61,7 +62,13 @@ HINTS = {
                       "(0 = use all). Fewer templates = less GPU work in "
                       "matchingPursuit = better real-time performance on low-spec "
                       "GPUs, at some loss of detection. Applied to oss_input every "
-                      "launch.")
+                      "launch."),
+    "CHANNEL_RANGE": ("Keep only templates with support on a probe channel range, "
+                      "e.g. '100-150' (inclusive probe channel numbers; blank = all "
+                      "channels). Use this to focus the sorter on one region of "
+                      "cortical space. Composes with Max templates: the channel "
+                      "range narrows the field first, then Max templates keeps the "
+                      "most active survivors. Applied to oss_input every launch.")
 }
 
 def show_hint(key):
@@ -112,7 +119,7 @@ def update_tabs():
                     meta_file_vars, chanmap_file_vars, rerun_ks_vars,
                     sdm_vars, sdm_ip_vars, sdm_port_vars,
                     sdm_subset_vars, sdm_trigger_z_vars, sdm_baseline_min_seconds_vars, sdm_trigger_bin_ms_vars,
-                    max_templates_vars, file_frames, sdm_frames):
+                    max_templates_vars, channel_range_vars, file_frames, sdm_frames):
             del lst[n:]
 
     # Append new entries if increasing
@@ -131,6 +138,7 @@ def update_tabs():
         sdm_baseline_min_seconds_vars.append(tk.StringVar(value="10.0"))
         sdm_trigger_bin_ms_vars.append(tk.StringVar(value="100"))
         max_templates_vars.append(tk.StringVar(value="0"))
+        channel_range_vars.append(tk.StringVar(value=""))
         file_frames.append(None)
         sdm_frames.append(None)
 
@@ -177,6 +185,18 @@ def build_tab(frame, idx):
     )
     tk.Button(
         frame, text="?", command=lambda i=idx: show_hint("MAX_TEMPLATES"), width=3
+    ).grid(row=row, column=3)
+    row += 1
+
+    # Channel range (blank = all channels)
+    tk.Label(frame, text="Channel range (e.g. 100-150):").grid(
+        row=row, column=0, padx=5, pady=5, sticky="w"
+    )
+    tk.Entry(frame, textvariable=channel_range_vars[idx], width=10).grid(
+        row=row, column=1, sticky="w"
+    )
+    tk.Button(
+        frame, text="?", command=lambda i=idx: show_hint("CHANNEL_RANGE"), width=3
     ).grid(row=row, column=3)
     row += 1
 
@@ -348,6 +368,7 @@ def main():
             sdm_baseline_min_seconds_vars[i].set(state.get("sdm_baseline_min_seconds", ["10.0"] * num_sorters_var.get())[i])
             sdm_trigger_bin_ms_vars[i].set(state.get("sdm_trigger_bin_ms", ["50"] * num_sorters_var.get())[i])
             max_templates_vars[i].set(state.get("max_templates", ["0"] * num_sorters_var.get())[i])
+            channel_range_vars[i].set(state.get("channel_ranges", [""] * num_sorters_var.get())[i])
 
     create_finish_widgets()
     root.mainloop()
@@ -372,6 +393,7 @@ def run_online_multi():
     SDM_BASELINE_MIN_SECONDS = [v.get().strip() for v in sdm_baseline_min_seconds_vars]
     SDM_TRIGGER_BIN_MS = [v.get().strip() for v in sdm_trigger_bin_ms_vars]
     MAX_TEMPLATES = [v.get().strip() for v in max_templates_vars]
+    CHANNEL_RANGES = [v.get().strip() for v in channel_range_vars]
 
     # Save current state
     state = {
@@ -389,7 +411,8 @@ def run_online_multi():
         "sdm_trigger_zs": SDM_TRIGGER_ZS,
         "sdm_baseline_min_seconds": SDM_BASELINE_MIN_SECONDS,
         "sdm_trigger_bin_ms": SDM_TRIGGER_BIN_MS,
-        "max_templates": MAX_TEMPLATES
+        "max_templates": MAX_TEMPLATES,
+        "channel_ranges": CHANNEL_RANGES
     }
     try:
         with open(STATE_FILE, "w") as f:
@@ -400,7 +423,7 @@ def run_online_multi():
     # Curate OSS input dirs
     OSS_DIRS = curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
                                      META_FILES, CHANMAP_FILES, RERUN_FLAGS,
-                                     MAX_TEMPLATES)
+                                     MAX_TEMPLATES, CHANNEL_RANGES)
 
     # Build and run C++ command
     decoder_input_dirs = [bp / 'decoder_input' for bp in BASE_PATHS]
@@ -512,7 +535,7 @@ def cluster_centroids_pca_compute(templates, Wall, pc_feature_ind):
 
 def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
                          META_FILES, CHANMAP_FILES, RERUN_FLAGS,
-                         MAX_TEMPLATES=None):
+                         MAX_TEMPLATES=None, CHANNEL_RANGES=None):
     OSS_DIRS = []
     for i, base in enumerate(BASE_PATHS):
         ks_out = KS_OUTPUT_DIRS[i]
@@ -606,13 +629,18 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
             f.write(f"Th_learned:{ops['Th_learned']}\n")
             f.write(f"duplicate_spike_bins:{ops['duplicate_spike_bins']}\n")
 
-        # Optionally subset preclustered templates for lower-spec GPUs
+        # Optionally subset preclustered templates for lower-spec GPUs and/or
+        # to focus on a probe channel range. The two filters compose: the
+        # channel range narrows the field first, then max_templates caps the
+        # most active survivors.
         try:
             n_keep = int(MAX_TEMPLATES[i]) if MAX_TEMPLATES else 0
         except (ValueError, TypeError):
             n_keep = 0
-        if n_keep > 0:
-            subset_oss_input_inplace(oss_in, n_keep, metric="spikes", allow_below_t=True)
+        chan_range = parse_channel_range(CHANNEL_RANGES[i]) if CHANNEL_RANGES else None
+        if n_keep > 0 or chan_range is not None:
+            subset_oss_input_inplace(oss_in, n_keep, metric="spikes",
+                                     allow_below_t=True, channel_range=chan_range)
 
         OSS_DIRS.append(str(oss_in) + '\\')
     return OSS_DIRS

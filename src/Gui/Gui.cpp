@@ -31,6 +31,11 @@ ImGuiID g_rasterDockNode = 0;
 
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+// GUI font scale knobs
+static constexpr float GUI_FONT_SIZE           = 25.0f; // What size font renders at (default is 26.0f)
+static constexpr float GUI_FONT_GLOBAL_SCALE   = 1.0f;  // Multiplier to upscale GUI_FONT_SIZE
+static constexpr float GUI_UI_SCALE            = 1.8f;  // Multiplies every style metric (padding, spacing, scrollbar width, frame heights)
+
 Gui::Gui(InputParameters cmdLineParams):
 	finished(false),
 	clear_color(ImVec4(0.45f, 0.55f, 0.60f, 1.00f)),
@@ -42,7 +47,7 @@ Gui::Gui(InputParameters cmdLineParams):
 		//ImGui_ImplWin32_EnableDpiAwareness();
 	wc = { sizeof(WNDCLASSEX), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(NULL), NULL, NULL, NULL, NULL, _T("ImGui Example"), NULL };
 	::RegisterClassEx(&wc);
-	hwnd = ::CreateWindow(wc.lpszClassName, _T("Dockspace"), WS_OVERLAPPEDWINDOW, 100, 100, 1280, 800, NULL, NULL, wc.hInstance, NULL);
+	hwnd = ::CreateWindow(wc.lpszClassName, _T("Live Spikes"), WS_OVERLAPPEDWINDOW, 100, 100, 1280, 800, NULL, NULL, wc.hInstance, NULL);
 
 	// Initialize Direct3D
 	if (!CreateDeviceD3D(hwnd))
@@ -64,7 +69,8 @@ Gui::Gui(InputParameters cmdLineParams):
 	//io.ConfigViewportsNoTaskBarIcon = true;
 
 	// Setup Dear ImGui style
-	//ImGui::StyleColorsDark();
+	// TODO: add custom dark style for LSS icon visually compatible with built-in Darkmode
+	// ImGui::StyleColorsDark();
 	ImGui::StyleColorsLight();
 
 	// When viewports are enabled we tweak WindowRounding/WindowBg so platform windows can look identical to regular ones.
@@ -74,6 +80,17 @@ Gui::Gui(InputParameters cmdLineParams):
 		style.WindowRounding = 0.0f;
 		style.Colors[ImGuiCol_WindowBg].w = 1.0f;
 	}
+
+	ImFontConfig fontCfg;
+	fontCfg.SizePixels = GUI_FONT_SIZE;
+	ImFont* uiFont = nullptr;
+	const char* fontPath = "C:\\Windows\\Fonts\\segoeui.ttf";
+	if (GetFileAttributesA(fontPath) != INVALID_FILE_ATTRIBUTES)
+		uiFont = io.Fonts->AddFontFromFileTTF(fontPath, GUI_FONT_SIZE);
+	if (!uiFont)
+		io.Fonts->AddFontDefault(&fontCfg);   // bult-in font as fallback
+	io.FontGlobalScale = GUI_FONT_GLOBAL_SCALE;
+	style.ScaleAllSizes(GUI_UI_SCALE);
 
 	// Setup Platform/Renderer backends
 	ImGui_ImplWin32_Init(hwnd);
@@ -197,7 +214,7 @@ void Gui::plotOutputs(sockaddr_in mainAddr, long m_lMaxScanWind, long m_lSpikeRa
 		{
 			for (int i = 0; i < 1024; ++i)
 			{
-				std::string name = "Spike " + std::to_string(i) + " Stats";
+				std::string name = "Neuron " + std::to_string(i) + " Stats";
 				ImGuiWindow* w = ImGui::FindWindowByName(name.c_str());
 				if (w && w->DockId != 0) { g_spikeStatsDockNode = w->DockId; break; }
 			}
@@ -299,7 +316,7 @@ void Gui::endFrame(ImVec4 &clear_color, ImGuiIO &io) {
 //  |       (LEFT_RASTER: 75% tall)          | (RIGHT_TOP: 50% tall) |
 //  |                                        +-----------------------+
 //  +-------------------+--------------------+                       |
-//  |   LSS Icon        |   Neurons          |   Spike 0 Stats       |
+//  |   LSS Icon        |   Neurons          |   Neuron 0 Stats       |
 //  | (ICON_DISPLAY_W)  |   (remainder)      | (RIGHT_TOP: 50% tall) |
 //  +-------------------+--------------------+-----------------------+
 //
@@ -313,9 +330,11 @@ static constexpr float LAYOUT_LEFT_RASTER_FRAC = 0.75f;
 // Processing-time panel height as a fraction of the right column height (0–1)
 static constexpr float LAYOUT_RIGHT_TOP_FRAC = 0.50f;
 // Icon panel width in pixels — drives the icon/neurons split in the bottom strip
-static constexpr float ICON_DISPLAY_W        = 100.0f;
+static constexpr float ICON_DISPLAY_W        = 300.0f;
 // Icon panel height in pixels (floating fallback only; docked height follows the split)
-static constexpr float ICON_DISPLAY_H        = 100.0f;
+static constexpr float ICON_DISPLAY_H        = 300.0f;
+// Vertical placement of the icon in its panel (0-1 where 0.5 is center)
+static constexpr float ICON_VERTICAL_FRAC = 0.99f;
 
 static void LoadIconTexture()
 {
@@ -325,7 +344,7 @@ static void LoadIconTexture()
 	std::wstring path(exePath);
 	for (int i = 0; i < 3; ++i)
 		path = path.substr(0, path.find_last_of(L'\\'));
-	path += L"\\src\\Gui\\LSS_icon";
+	path += L"\\src\\Gui\\LSS_icon.jpg";
 
 	CoInitializeEx(NULL, COINIT_MULTITHREADED);
 
@@ -491,16 +510,24 @@ void Gui::RenderIconWindow()
 
 	const float aspect = (float)g_iconWidth / (float)g_iconHeight;
 	ImGui::SetNextWindowSize(ImVec2(ICON_DISPLAY_W, ICON_DISPLAY_H), ImGuiCond_FirstUseEver);
+	
+	ImGuiWindowClass iconClass;
+	iconClass.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoTabBar;
+	ImGui::SetNextWindowClass(&iconClass);
+	
 	ImGui::Begin("LSS Icon", nullptr,
 		ImGuiWindowFlags_NoTitleBar        |
 		ImGuiWindowFlags_NoScrollbar       |
 		ImGuiWindowFlags_NoScrollWithMouse |
 		ImGuiWindowFlags_NoBringToFrontOnFocus);
 
+	ImVec2 start = ImGui::GetCursorPos();
 	ImVec2 avail = ImGui::GetContentRegionAvail();
 	float drawW = avail.x, drawH = drawW / aspect;
 	if (drawH > avail.y) { drawH = avail.y; drawW = drawH * aspect; }
-	ImGui::SetCursorPos(ImVec2((avail.x - drawW) * 0.5f, (avail.y - drawH) * 0.5f));
+	//ImGui::SetCursorPos(ImVec2((avail.x - drawW) * 0.5f, (avail.y - drawH) * 0.5f));
+	ImGui::SetCursorPos(ImVec2(start.x + (avail.x - drawW) * 0.5f, start.y + (avail.y - drawH) * ICON_VERTICAL_FRAC));
+
 	ImGui::Image((ImTextureID)g_iconSrvGpuHandle.ptr, ImVec2(drawW, drawH));
 	ImGui::End();
 }

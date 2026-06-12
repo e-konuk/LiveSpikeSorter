@@ -433,17 +433,21 @@ void OutputGuiTab::plotProcessTimes(const ImVec2 windowCenter, bool &showProcess
 	int toShow = useFullHistory || (historyNBatches > len) ? len : historyNBatches;
 	int toSkip = len - toShow;
 
-	// Calculate mean
-	double mean = (double)std::reduce(m_vProcessTimes.begin() + toSkip, m_vProcessTimes.end()) / toShow;
+	double mean = 0.0, stdDev = 0.0, inTimePerc = 0.0;
+	if (toShow > 0) {
+		// Calculate mean
+		mean = (double)std::reduce(m_vProcessTimes.begin() + toSkip, m_vProcessTimes.end()) / toShow;
+		// Calculate std
+    	std::vector<double> diff(toShow);
+    	std::transform(m_vProcessTimes.begin() + toSkip, m_vProcessTimes.end(), diff.begin(), [mean](double x) { return x - mean; });
+    	double sqSum = std::inner_product(diff.begin(), diff.end(), diff.begin(), 0.0);
+    	stdDev = std::sqrt(sqSum / toShow);
 
-	// Calculate std
-	std::vector<double> diff(toShow);
-	std::transform(m_vProcessTimes.begin() + toSkip, m_vProcessTimes.end(), diff.begin(), [mean](double x) { return x - mean; });
-	double sqSum = std::inner_product(diff.begin(), diff.end(), diff.begin(), 0.0);
-	double stdDev = std::sqrt(sqSum / toShow);
 
-	double inTimeCount = std::count_if(m_vProcessTimes.begin() + toSkip, m_vProcessTimes.end(), [&](long const val) { return val < maxScanWindow; });
-	double inTimePerc = inTimeCount / toShow;
+		double inTimeCount = std::count_if(m_vProcessTimes.begin() + toSkip, m_vProcessTimes.end(), [&](long const val) { return val < maxScanWindow; });
+    	inTimePerc = inTimeCount / toShow;
+	}
+
 	processingTimeMutex.unlock();
 
 	static int bins = 50;
@@ -456,7 +460,9 @@ void OutputGuiTab::plotProcessTimes(const ImVec2 windowCenter, bool &showProcess
 	ImGui::Text("Mean: %.2f,  STD: %.2f, Percentage on time: %.2f", mean, stdDev, inTimePerc);
 
 	if (ImPlot::BeginPlot("Batch Processing Time Distribution", ImVec2(-1, -1))) {
-		ImPlot::SetupAxes("Time (ms)", "Density", ImPlotAxisFlags_AutoFit);
+		ImPlot::SetupAxes("Time (ms)", "Density", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
+		ImPlot::SetupAxisLimits(ImAxis_X1, 0, range, ImPlotCond_Always);
+		ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 0.1, ImPlotCond_Always);
 		ImPlot::SetupLegend(ImPlotLocation_NorthEast);
 		ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
 		processingTimeMutex.lock();
@@ -541,7 +547,7 @@ void Neuron::Update(OutputGuiTab* outputGUI) {
 		if (g_spikeStatsDockNode != 0)
 			ImGui::SetNextWindowDockID(g_spikeStatsDockNode, ImGuiCond_Always);
 
-		std::string txt = "Spike " + std::to_string(m_inumber) + " Stats";
+		std::string txt = "Neuron " + std::to_string(m_inumber) + " Stats";
 		if (!ImGui::Begin(txt.c_str(), &m_bSelected)) { ImGui::End(); return; }
 
 		txt = " FR: " + std::_Floating_to_string("%.2f", GetSpikeRate()) + "Hz, nSpikes: " + std::to_string(GetTotSpikeCount());

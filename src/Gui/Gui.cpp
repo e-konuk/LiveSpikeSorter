@@ -32,9 +32,9 @@ ImGuiID g_rasterDockNode = 0;
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 // GUI font scale knobs
-static constexpr float GUI_FONT_SIZE           = 25.0f; // What size font renders at (default is 26.0f)
+static constexpr float GUI_FONT_SIZE           = 30.0f; // What size font renders at (default is 26.0f)
 static constexpr float GUI_FONT_GLOBAL_SCALE   = 1.0f;  // Multiplier to upscale GUI_FONT_SIZE
-static constexpr float GUI_UI_SCALE            = 1.8f;  // Multiplies every style metric (padding, spacing, scrollbar width, frame heights)
+static constexpr float GUI_UI_SCALE            = 0.7f;  // Multiplies every style metric (padding, spacing, scrollbar width, frame heights)
 
 Gui::Gui(InputParameters cmdLineParams):
 	finished(false),
@@ -169,8 +169,6 @@ void Gui::plotOutputs(sockaddr_in mainAddr, long m_lMaxScanWind, long m_lSpikeRa
 	}
 	io.IniFilename = s_iniPath;
 
-	const bool hasIni = (GetFileAttributesA(io.IniFilename) != INVALID_FILE_ATTRIBUTES);
-
 	// OutputGUI's Main loop
 	while (true)
 	{
@@ -194,7 +192,7 @@ void Gui::plotOutputs(sockaddr_in mainAddr, long m_lMaxScanWind, long m_lSpikeRa
 
 		// Build default layout once, only when no saved ini exists
 		static bool layoutApplied = false;
-		if (!hasIni && !layoutApplied)
+		if (!layoutApplied)
 		{
 			ImGuiDockNode* root = ImGui::DockBuilderGetNode(dockspace_id);
 			if (root != nullptr)
@@ -495,6 +493,7 @@ static void BuildDockLayout(ImGuiID dockspace_id)
 
 	// Assign windows to slots — change the string to move a window elsewhere
 	ImGui::DockBuilderDockWindow("Raster Plot",                  top_left);
+	ImGui::DockBuilderDockWindow("Plot Menu",                    top_left);
 	ImGui::DockBuilderDockWindow("LSS Icon",                     icon_node);
 	ImGui::DockBuilderDockWindow("Neurons",                      neurons_node);
 	ImGui::DockBuilderDockWindow("Processing time distribution", top_right);

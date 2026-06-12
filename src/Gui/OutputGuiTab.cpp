@@ -248,6 +248,18 @@ void OutputGuiTab::DrawImGUI(const ImVec2 windowCenter) {
 	//	displayTrialInfo(windowCenter, showTrialInfo);
 }
 
+static void RasterTimeAxisFormatter(double value, char* buff, int size, void* /*user_data*/) {
+	if (value < 0.0) value = 0.0;
+	long totalSec = (long)(value + 0.5);
+	long h = totalSec / 3600;
+	long m = (totalSec % 3600) / 60;
+	long s = totalSec % 60;
+	if (h > 0)
+		snprintf(buff, size, "%ld:%02ld:%02ld", h, m, s);
+	else
+		snprintf(buff, size, "%ld:%02ld", m, s);
+}
+
 
 void OutputGuiTab::plotRaster(const ImVec2 windowCenter, bool &showRaster) {
 	if (g_rasterDockNode != 0)
@@ -267,7 +279,32 @@ void OutputGuiTab::plotRaster(const ImVec2 windowCenter, bool &showRaster) {
 	ImGui::InputInt("History (s):", &history, 1, 10);
 	history = max(1, history); // TODO clampedInput
 
-	static std::vector<long> yVal;
+
+	
+	ImGui::SameLine();
+	ImGui::Checkbox("Fit to active neurons", &m_bFittoActive);
+
+	double yLo = m_iMinNeuronIndex - 0.5;
+	double yHi = m_lT - 0.5;
+	if (m_bFittoActive) {
+		int lo = INT_MAX, hi = INT_MIN;
+		for (int i = 0; i < m_lT; i++) {
+			std::lock_guard<std::mutex> lock(m_bNeurons[i]->spikeTimeMutex);
+			if (m_bNeurons[i]->m_vSpikeTime.empty())
+			continue;
+			if (i < lo) lo = i;
+			if (i > hi) hi = i;
+		}
+		if (lo <= hi) { // check if at least one neuron has fired
+			yLo = lo - 0.5;
+			yHi = hi + 0.5;
+		}
+	}
+
+
+
+	static std::vector<double> yVal;
+	static std::vector<double> xSec;
 	int size;
 
 	// Compute the history window size (in streamSampleCounts)
@@ -278,31 +315,52 @@ void OutputGuiTab::plotRaster(const ImVec2 windowCenter, bool &showRaster) {
 
 	if (streamSampleCt < window) { // Start of run edge case (No scrolling because looking at a time window < window)
 		ImPlot::SetNextAxisToFit(ImAxis_X1);
-		ImPlot::SetNextAxisLimits(ImAxis_Y1, m_iMinNeuronIndex - 0.5, m_lT - 0.5, ImPlotCond_Always);
+		ImPlot::SetNextAxisLimits(ImAxis_Y1, yLo, yHi, ImPlotCond_Always);
 
 		if (ImPlot::BeginPlot("Raster plot:", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText | ImPlotFlags_NoTitle)) {
-			ImPlot::SetupAxes("Time (stream sample counts)", "Neuron");
-
+			ImPlot::SetupAxes("Time (hh:mm:ss)", "Neuron");
+			ImPlot::SetupAxisFormat(ImAxis_X1, RasterTimeAxisFormatter);
+			
+			const double secPerSample = 1.0 / (double)m_fSampRate;
 			for (int i = 0; i < m_lT; i++) {
 				std::lock_guard<std::mutex> lock(m_bNeurons[i]->spikeTimeMutex);
 				if (m_bNeurons[i]->m_vSpikeTime.empty())
 					continue;
 
 				size = m_bNeurons[i]->m_vSpikeTime.size();
-				yVal = std::vector<long>(size, m_bNeurons[i]->m_inumber);
+				xSec.resize(size);
+				for (int k = 0; k < size; k++) {
+					xSec[k] = m_bNeurons[i]->m_vSpikeTime[k] * secPerSample;
+				}
+				yVal.assign(size, (double)m_bNeurons[i]->m_inumber);
 				ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 0.8F, ImVec4(0.26f, 0.59f, 0.98f, 0.78f), IMPLOT_AUTO, ImVec4(0.26f, 0.59f, 0.98f, 0.78f));
-				ImPlot::PlotScatter(("N" + std::to_string(i)).c_str(), m_bNeurons[i]->m_vSpikeTime.data(), yVal.data(), size);
+				ImPlot::PlotScatter(("N" + std::to_string(i)).c_str(), xSec.data(), yVal.data(), size);
 			}
 
 			ImPlot::EndPlot();
 		}
 	}
 	else { // Non-edge case behavior (Scrolling raster of size window)
-		ImPlot::SetNextAxisLimits(ImAxis_X1, startingStreamSampleCt, startingStreamSampleCt + window, ImPlotCond_Always);
-		ImPlot::SetNextAxisLimits(ImAxis_Y1, m_iMinNeuronIndex - 0.5, m_lT - 0.5, ImPlotCond_Always);  // TODO, allow to look at more specific neurons
+
+		const double secPerSample = 1.0 / (double)m_fSampRate;
+		ImPlot::SetNextAxisLimits(ImAxis_X1, startingStreamSampleCt * secPerSample, (startingStreamSampleCt + window) * secPerSample, ImPlotCond_Always);
+		ImPlot::SetNextAxisLimits(ImAxis_Y1, yLo, yHi, ImPlotCond_Always);  // TODO, allow to look at more specific neurons
 
 		if (ImPlot::BeginPlot("Raster plot:", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText | ImPlotFlags_NoTitle)) {
-			ImPlot::SetupAxes("Time (stream sample counts)", "Neuron");
+			ImPlot::SetupAxes("Time (hh:mm:ss)", "Neuron");
+			ImPlot::SetupAxisFormat(ImAxis_X1, RasterTimeAxisFormatter);
+
+			const double startSec = startingStreamSampleCt * secPerSample;
+			const double endSec = (startingStreamSampleCt + window) * secPerSample;
+			static const double kStepLadder[] = { 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600 };
+			double rawStep = (endSec - startSec) / 6.0; // aim for ~6 ticks
+			double step = kStepLadder[0];
+			for (double cand : kStepLadder) { step = cand; if (cand >= rawStep) break; }
+			std::vector<double> tickSec;
+			for (double t = std::ceil(startSec / step) * step; t <= endSec; t += step)
+				tickSec.push_back(t);
+			if (!tickSec.empty())
+				ImPlot::SetupAxisTicks(ImAxis_X1, tickSec.data(), (int)tickSec.size());
 
 			for (int i = 0; i < m_lT; i++) {
 				std::lock_guard<std::mutex> lock(m_bNeurons[i]->spikeTimeMutex);
@@ -325,14 +383,18 @@ void OutputGuiTab::plotRaster(const ImVec2 windowCenter, bool &showRaster) {
 
 				if (startingIndex == -1)
 					continue;
-
-				std::vector<long> windowSpikesTimes(m_bNeurons[i]->m_vSpikeTime.begin() + startingIndex, m_bNeurons[i]->m_vSpikeTime.end());
-
-				size = windowSpikesTimes.size();
-				yVal = std::vector<long>(size, i);
+				
+					
+				size = m_bNeurons[i]->m_vSpikeTime.size() - startingIndex;
+				xSec.resize(size);
+				for (int k = 0; k < size; k++)
+				{
+					xSec[k] = m_bNeurons[i]->m_vSpikeTime[startingIndex + k] * secPerSample;
+				}
+				yVal.assign(size, (double)i);
 
 				ImPlot::SetNextMarkerStyle(ImPlotMarker_Circle, 0.8F, ImVec4(0.26f, 0.59f, 0.98f, 0.78f), IMPLOT_AUTO, ImVec4(0.26f, 0.59f, 0.98f, 0.78f));
-				ImPlot::PlotScatter(("N" + std::to_string(i)).c_str(), windowSpikesTimes.data(), yVal.data(), size);
+				ImPlot::PlotScatter(("N" + std::to_string(i)).c_str(), xSec.data(), yVal.data(), size);
 			}
 
 			ImPlot::EndPlot();
@@ -350,6 +412,8 @@ void OutputGuiTab::displayNeuronInfo(const ImVec2 windowCenter, bool &showNeuron
 
 	std::string txt;
 	for (int ij = 0; ij < m_lT; ij++) {
+		if (m_bFittoActive && m_bNeurons[ij]->GetTotSpikeCount() == 0)
+			continue;
 		txt = "N" + std::to_string(ij);
 		if (ImGui::Button(txt.c_str())) {
 			m_bNeurons[ij]->SelectNeuron();
@@ -459,14 +523,39 @@ void OutputGuiTab::plotProcessTimes(const ImVec2 windowCenter, bool &showProcess
 
 	ImGui::Text("Mean: %.2f,  STD: %.2f, Percentage on time: %.2f", mean, stdDev, inTimePerc);
 
+	static const double kYTiers[]    = { 0.15, 0.20, 0.30, 0.50, 0.80, 1.0, 1.5, 2.0 };
+	static const int    kNumYTiers   = (int)(sizeof(kYTiers) / sizeof(kYTiers[0]));
+	static int          yTier        = 0;    // index into kYTiers; 0 is the floor
+	static double       lastPeak     = 0.0;  // density peak returned by PlotHistogram last frame
+	static int          framesBelow  = 0;    // consecutive frames the peak fit the lower tier
+	const double        kFillUp      = 0.85; // step up when the peak exceeds 85% of the current tier
+	const int           kDownHold    = 120;  // ~2 s at 60 fps the peak must stay low before stepping down
+
+	// Step up immediately -- clipping is the worst outcome, so bump until the peak fits.
+	while (yTier < kNumYTiers - 1 && lastPeak > kFillUp * kYTiers[yTier]) {
+		yTier++;
+		framesBelow = 0;
+	}
+	// Step down only after the peak stays comfortably inside the next-lower tier.
+	if (yTier > 0 && lastPeak < kFillUp * kYTiers[yTier - 1]) {
+		if (++framesBelow >= kDownHold) {
+			yTier--;
+			framesBelow = 0;
+		}
+	} else {
+		framesBelow = 0;
+	}
+	const double yMax = kYTiers[yTier];
+
+
 	if (ImPlot::BeginPlot("Batch Processing Time Distribution", ImVec2(-1, -1))) {
 		ImPlot::SetupAxes("Time (ms)", "Density", ImPlotAxisFlags_None, ImPlotAxisFlags_None);
 		ImPlot::SetupAxisLimits(ImAxis_X1, 0, range, ImPlotCond_Always);
-		ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 0.1, ImPlotCond_Always);
+		ImPlot::SetupAxisLimits(ImAxis_Y1, 0, yMax, ImPlotCond_Always);
 		ImPlot::SetupLegend(ImPlotLocation_NorthEast);
 		ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
 		processingTimeMutex.lock();
-		ImPlot::PlotHistogram("ProcessTimes", m_vProcessTimes.data() + toSkip, toShow, bins, false, true, ImPlotRange(0, range));
+		lastPeak = ImPlot::PlotHistogram("ProcessTimes", m_vProcessTimes.data() + toSkip, toShow, bins, false, true, ImPlotRange(0, range));
 		processingTimeMutex.unlock();
 		ImPlot::PlotVLines("Batch Size", &maxScanWindow, 1);
 		ImPlot::EndPlot();

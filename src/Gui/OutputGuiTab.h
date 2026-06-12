@@ -91,6 +91,9 @@ public:
 	int m_iMinNeuronIndex;
 	std::string tabName;
 
+	// Shared toggle for showing subset neurons in raster plot
+	bool m_bFittoActive = false;
+
 	//sorter objects
 	std::vector<double> m_dChanpos;
 

@@ -20,6 +20,7 @@ Live Spike Sorter (LSS) is a GPU-accelerated real-time spike sorter for extracel
 1. Open `OnlineSpikes.vcxproj` in Visual Studio 2017.
 2. Set the `CUDA_PATH` environment variable to your CUDA 11.3 installation (e.g. `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.3`).
 3. Select **Release | x64** and build the solution.
+4. If successful, you should see output in `<repo>\x64\RELEASE\OnlineSpikes.exe`
 
 ### Common Build Errors
 
@@ -34,9 +35,9 @@ Create a virtual environment with Python 3.10 and install the required packages:
 python -m venv venv
 venv\Scripts\activate
 
-pip install kilosort
-pip install torch==1.12.0+cu113 torchaudio==0.12.0+cu113 torchvision==0.13.0+cu113 -f https://download.pytorch.org/whl/torch_stable.html
-pip install numpy scipy scikit-learn matplotlib
+pip install kilosort==4.0.13
+pip install torch==1.12.0+cu113 -f https://download.pytorch.org/whl/torch_stable.html
+pip install "numpy<2" scipy scikit-learn matplotlib h5py
 pip install spikeinterface probeinterface
 pip install h5py pyqtgraph PyQt5
 ```

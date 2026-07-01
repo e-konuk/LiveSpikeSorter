@@ -55,8 +55,6 @@ InputGUI::InputGUI(InputParameters cmdLineParams)
 		? Params.sDecoderWorkFolder + "log.txt"
 		: cmdLineParams.sLogFile;
 
-	Params.iMaxVramMB = cmdLineParams.iMaxVramMB;
-
 	Params.sdmIP = cmdLineParams.sdmIP;
 	Params.sdmPort = cmdLineParams.sdmPort;
 	Params.vSdmActivitySubset = cmdLineParams.vSdmActivitySubset;
@@ -93,10 +91,12 @@ InputGUI::InputGUI(InputParameters cmdLineParams)
 	ensure_key(Params.mapSpikeFiles, Params.sSpikesFile);
 	ensure_key(Params.mapOSSOutputFolders, Params.sOSSOutputFolder);
 
+	Params.bSkipInputGui = cmdLineParams.bSkipInputGui;
+
 	// TODO: remove the marked entries from InputParameters and remove any dependencies on them
 	/* -------- fixed defaults -------- */
-	Params.sDataAccquisitionHost = _LOCAL_HOST;
-	Params.uDataAccquisitionPort = 4142;
+	Params.sDataAccquisitionHost = cmdLineParams.sDataAccquisitionHost.empty() ? _LOCAL_HOST : cmdLineParams.sDataAccquisitionHost;
+	Params.uDataAccquisitionPort = cmdLineParams.uDataAccquisitionPort != 0 ? cmdLineParams.uDataAccquisitionPort : 4142;
 	Params.fImecSamplingRate = 30000.f;
 	Params.fNidqSamplingRate = 25000.f;
 	Params.fThresholdStd = 3.f;
@@ -212,10 +212,6 @@ void InputGUI::gatherNetworkParameters() {
 }
 
 void InputGUI::gatherDataAccquisitionParameters() {
-	ImGui::Text("Input Folder:"); ImGui::SameLine();
-	HelpMarker("Folder containing the templates.npy, whitening_mat.npy, and channel_map.npy files.");
-	InputTextWithFileDialog("##Folder", &Params.sInputFolder, "Select##folderButton", Params.sInputFolder.c_str(), NULL, NULL, NULL, true);
-
 	ImGui::Text("Imec Sampling Rate (Hz):");
 	ImGui::InputFloat("##ImecSampRate", &Params.fImecSamplingRate, 100, 1000, "%.6f");
 
@@ -276,12 +272,6 @@ void InputGUI::gatherGPUParameters() {
 	}
 
 	Params.vSelectedDevices = newSelectedDevices;
-
-	ImGui::Separator();
-	ImGui::Text("VRAM Cap (MB):"); ImGui::SameLine();
-	HelpMarker("0 = no cap (default). Set to e.g. 6144 to simulate a 6 GB GPU: a ballast buffer will consume the difference at startup so real OOM occurs if the sorter over-allocates.");
-	ImGui::InputInt("##VramCap", &Params.iMaxVramMB, 256, 1024);
-	if (Params.iMaxVramMB < 0) Params.iMaxVramMB = 0;
 }
 
 void InputGUI::gatherSpikeSorterParameters() {
@@ -399,12 +389,7 @@ void InputGUI::gatherDecoderParameters() {
 	*/
 	ImGui::Checkbox("Use real-time decoding.", &Params.bIsDecoding);
 	ImGui::SameLine(); HelpMarker("To use the decoder, first run the spikesorter for 10-20 minutes with this unchecked to produce a file called spike_output.txt. Then, run the spikesorter again with this box checked. The decoder will use spike_output as training data to train a real time classifier.");
-	if (!Params.bIsDecoding) {
-		ImGui::Text("Spike Sorter output data file:");
-		ImGui::SameLine(); HelpMarker("Once written, use this file as the decoder training data file.");
-		ImGui::InputText("##SpikeFile", &Params.sSpikesFile);
-	}
-	else {
+	if (Params.bIsDecoding) {
 		ImGui::Text("Directory:");
 		ImGui::SameLine(); HelpMarker("Set the base directory. This will auto-populate the training data file, output folder, and event file paths.");
 		InputTextWithFileDialog("##Directory", &Params.sDecoderInputFolder, "Select##DirectoryButton", Params.sDecoderWorkFolder.c_str(), NULL, NULL, NULL, true);

@@ -121,6 +121,11 @@ Gui::~Gui() {
 
 InputParameters Gui::gatherInputParameters()
 {
+	// Launched via the Python launcher (--no_input_gui): skip the ImGui input
+	// window entirely and use the CLI-populated params as-is.
+	if (inputGUI.getInputParameters().bSkipInputGui)
+		return inputGUI.getInputParameters();
+
 	// Some state
 	bool isNetworking = true;
 
@@ -307,32 +312,32 @@ void Gui::endFrame(ImVec4 &clear_color, ImGuiIO &io) {
 //
 // Layout produced by the values below:
 //
-//  |<----------- LEFT_COL (55%) ----------->|<---- right (45%) ---->|
-//  +----------------------------------------+-----------------------+
-//  |                                        |                       |
-//  |         Raster Plot                    |   Processing Times    |
-//  |       (LEFT_RASTER: 75% tall)          | (RIGHT_TOP: 50% tall) |
-//  |                                        +-----------------------+
-//  +-------------------+--------------------+                       |
-//  |   LSS Icon        |   Neurons          |   Neuron 0 Stats       |
-//  | (ICON_DISPLAY_W)  |   (remainder)      | (RIGHT_TOP: 50% tall) |
-//  +-------------------+--------------------+-----------------------+
+//  |<----------- LEFT_COL (55%) --------->|<---- right (45%) ---->|
+//  +--------------------------------------+-----------------------+
+//  |                                      |                       |
+//  |         Raster Plot                  |   Processing Times    |
+//  |       (LEFT_RASTER: 75% tall)        | (RIGHT_TOP: 50% tall) |
+//  |                                      +-----------------------+
+//  +-------------------+------------------+                       |
+//  |   LSS Icon        |   Neurons        |   Neuron N Stats      |
+//  | (ICON_DISPLAY_W)  |   (remainder)    | (RIGHT_TOP: 50% tall) |
+//  +-------------------+------------------+-----------------------+
 //
 // To move a window to a different slot, swap its string in BuildDockLayout below.
 // =============================================================================
 
 // Left column width as a fraction of the total screen width (0–1)
-static constexpr float LAYOUT_LEFT_COL_FRAC  = 0.55f;
+static constexpr float LAYOUT_LEFT_COL_FRAC    = 0.55f;
 // Raster plot height as a fraction of the left column height (0–1)
 static constexpr float LAYOUT_LEFT_RASTER_FRAC = 0.75f;
 // Processing-time panel height as a fraction of the right column height (0–1)
-static constexpr float LAYOUT_RIGHT_TOP_FRAC = 0.50f;
+static constexpr float LAYOUT_RIGHT_TOP_FRAC   = 0.50f;
 // Icon panel width in pixels — drives the icon/neurons split in the bottom strip
-static constexpr float ICON_DISPLAY_W        = 300.0f;
+static constexpr float ICON_DISPLAY_W          = 300.0f;
 // Icon panel height in pixels (floating fallback only; docked height follows the split)
-static constexpr float ICON_DISPLAY_H        = 300.0f;
+static constexpr float ICON_DISPLAY_H          = 300.0f;
 // Vertical placement of the icon in its panel (0-1 where 0.5 is center)
-static constexpr float ICON_VERTICAL_FRAC = 0.99f;
+static constexpr float ICON_VERTICAL_FRAC      = 0.99f;
 
 static void LoadIconTexture()
 {

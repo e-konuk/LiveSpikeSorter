@@ -304,12 +304,6 @@ OnlineSpikesV2::~OnlineSpikesV2()
 		MEMORY_VARIABLES
 	#undef X
 
-	// Release ballast buffer before freeing algorithm buffers
-	if (d_vramBallast) {
-		cudaFree(d_vramBallast);
-		d_vramBallast = nullptr;
-	}
-	
 	// Deallocate Device Memory
 	#define X(type, name, memType, size) \
 		if (memType == Device) { \
@@ -361,26 +355,6 @@ void OnlineSpikesV2::initializeSorter(InputParameters params) {
 	// Set CUDA device to the one that was chosen
 	setDevice(params.uSelectedDevice, &cudnnConvObj);
 	_CUDA_CALL(cudaSetDevice(params.uSelectedDevice));
-
-	// VRAM ballast: if iMaxVramMB > 0, consume the difference between device total and the cap
-	// so that downstream allocations see only the capped headroom (real OOM if exceeded).
-	if (params.iMaxVramMB > 0) {
-		size_t freeMem, totalMem;
-		_CUDA_CALL(cudaMemGetInfo(&freeMem, &totalMem));
-		size_t totalMB = totalMem / (1024ULL * 1024ULL);
-		size_t capBytes = (size_t)params.iMaxVramMB * 1024ULL * 1024ULL;
-		if (capBytes < totalMem) {
-		size_t ballastBytes = totalMem - capBytes;
-		_CUDA_CALL(cudaMalloc((void**)&d_vramBallast, ballastBytes));
-		std::cout << "[VRAM Cap] Device total: " << totalMB << " MB. Ballast: "
-			<< ballastBytes / (1024ULL * 1024ULL) << " MB. Effective cap: "
-			<< params.iMaxVramMB << " MB." << std::endl;
-		}
-		else {
-		std::cout << "[VRAM Cap] iMaxVramMB (" << params.iMaxVramMB
-			<< " MB) >= device total (" << totalMB << " MB). No ballast allocated." << std::endl;
-		}
-	}
 
 	std::cout << "OSS started with device number " << params.uSelectedDevice << " and input directory "
 		<< params.sInputFolder << std::endl;

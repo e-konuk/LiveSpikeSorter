@@ -24,8 +24,8 @@ struct InputParameters {
 								sSdmEventFile{},
 								sSdmDecoderWorkFolder{};
 
-	uint16						uDataAccquisitionPort,
-								uSelectedDevice;
+	uint16						uDataAccquisitionPort{ 0 },
+								uSelectedDevice{ 0 };
 
 	std::vector<uint16>			vSelectedDevices,
 								vChannelSubset;
@@ -72,7 +72,7 @@ struct InputParameters {
 
 	uint16_t					sdmPort{};
 
-	// GPU resource throttle — 0 = no cap
-	int							iMaxVramMB{ 0 };
+	// Skip the ImGui input window and use CLI-populated params directly
+	bool						bSkipInputGui{ false };
 };
 #endif

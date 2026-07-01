@@ -36,9 +36,29 @@ spin = tk.Spinbox(root, from_=1, to=16, textvariable=num_sorters_var, width=5, c
 tk.Label(root, text="Number of sorters:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
 spin.grid(row=0, column=1, padx=5, pady=5, sticky="w")
 
+# Global Data Acquisition parameters (shared across all sorters: one SpikeGLX
+# stream connection for the whole process)
+sglx_host_var = tk.StringVar(value="127.0.0.1")
+sglx_port_var = tk.StringVar(value="4142")
+
+daq_frame = tk.Frame(root, borderwidth=1, relief="groove")
+daq_frame.grid(row=1, column=0, columnspan=4, padx=5, pady=5, sticky="w")
+
+tk.Label(daq_frame, text="Data Acquisition (shared)", font=("TkDefaultFont", 9, "bold")).grid(
+    row=0, column=0, columnspan=4, padx=5, pady=(5, 2), sticky="w"
+)
+
+tk.Label(daq_frame, text="SGLX Host:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+tk.Entry(daq_frame, textvariable=sglx_host_var, width=15).grid(row=1, column=1, sticky="w")
+tk.Button(daq_frame, text="?", command=lambda: show_hint("SGLX_HOST"), width=3).grid(row=1, column=3)
+
+tk.Label(daq_frame, text="SGLX Port:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+tk.Entry(daq_frame, textvariable=sglx_port_var, width=15).grid(row=2, column=1, sticky="w")
+tk.Button(daq_frame, text="?", command=lambda: show_hint("SGLX_PORT"), width=3).grid(row=2, column=3)
+
 # Notebook for sorter tabs
 toolkit = ttk.Notebook(root)
-toolkit.grid(row=1, column=0, columnspan=4, padx=5, pady=5, sticky="nsew")
+toolkit.grid(row=2, column=0, columnspan=4, padx=5, pady=5, sticky="nsew")
 
 # Per-sorter storage
 base_path_vars, ks_output_dir_vars = [], []
@@ -68,7 +88,11 @@ HINTS = {
                       "channels). Use this to focus the sorter on one region of "
                       "cortical space. Composes with Max templates: the channel "
                       "range narrows the field first, then Max templates keeps the "
-                      "most active survivors. Applied to oss_input every launch.")
+                      "most active survivors. Applied to oss_input every launch."),
+    "SGLX_HOST": ("The IP address of the machine running SpikeGLX. If SpikeGLX is "
+                  "running on this same machine, leave as 127.0.0.1. Shared by all "
+                  "sorters (they use one SpikeGLX connection)."),
+    "SGLX_PORT": ("The port SpikeGLX is streaming on. Shared by all sorters.")
 }
 
 def show_hint(key):
@@ -176,29 +200,36 @@ def build_tab(frame, idx):
     ).grid(row=row, column=3)
     row += 1
 
-    # Max templates (0 = use all)
-    tk.Label(frame, text="Max templates (0 = all):").grid(
-        row=row, column=0, padx=5, pady=5, sticky="w"
-    )
-    tk.Entry(frame, textvariable=max_templates_vars[idx], width=10).grid(
-        row=row, column=1, sticky="w"
-    )
-    tk.Button(
-        frame, text="?", command=lambda i=idx: show_hint("MAX_TEMPLATES"), width=3
-    ).grid(row=row, column=3)
+    # Template selection sub-frame (groups the two template-subsetting filters)
+    template_frame = tk.Frame(frame, borderwidth=1, relief="sunken")
+    template_frame.grid(row=row, column=0, columnspan=4, padx=5, pady=5, sticky="w")
     row += 1
 
-    # Channel range (blank = all channels)
-    tk.Label(frame, text="Channel range (e.g. 100-150):").grid(
-        row=row, column=0, padx=5, pady=5, sticky="w"
+    tk.Label(template_frame, text="Template Selection", font=("TkDefaultFont", 9, "bold")).grid(
+        row=0, column=0, columnspan=4, padx=5, pady=(5, 2), sticky="w"
     )
-    tk.Entry(frame, textvariable=channel_range_vars[idx], width=10).grid(
-        row=row, column=1, sticky="w"
+
+    # Max templates (0 = use all)
+    tk.Label(template_frame, text="Max templates (0 = all):").grid(
+        row=1, column=0, padx=5, pady=5, sticky="w"
+    )
+    tk.Entry(template_frame, textvariable=max_templates_vars[idx], width=10).grid(
+        row=1, column=1, sticky="w"
     )
     tk.Button(
-        frame, text="?", command=lambda i=idx: show_hint("CHANNEL_RANGE"), width=3
-    ).grid(row=row, column=3)
-    row += 1
+        template_frame, text="?", command=lambda i=idx: show_hint("MAX_TEMPLATES"), width=3
+    ).grid(row=1, column=3)
+
+    # Channel range (blank = all channels)
+    tk.Label(template_frame, text="Channel range (e.g. 100-150):").grid(
+        row=2, column=0, padx=5, pady=5, sticky="w"
+    )
+    tk.Entry(template_frame, textvariable=channel_range_vars[idx], width=10).grid(
+        row=2, column=1, sticky="w"
+    )
+    tk.Button(
+        template_frame, text="?", command=lambda i=idx: show_hint("CHANNEL_RANGE"), width=3
+    ).grid(row=2, column=3)
 
     # BASE_PATH
     tk.Label(frame, text="BASE_PATH:").grid(
@@ -323,9 +354,9 @@ def build_tab(frame, idx):
 def create_finish_widgets():
     global finish_button, error_text
     finish_button = tk.Button(root, text="Finish", command=finish_and_quit)
-    finish_button.grid(row=2, column=0, columnspan=4, padx=5, pady=5)
+    finish_button.grid(row=3, column=0, columnspan=4, padx=5, pady=5)
     error_text = tk.Text(root, height=4, width=60, fg="red")
-    error_text.grid(row=3, column=0, columnspan=4, padx=5, pady=5)
+    error_text.grid(row=4, column=0, columnspan=4, padx=5, pady=5)
     error_text.configure(state="disabled")
 
 # Destroy GUI on finish
@@ -341,6 +372,8 @@ def main():
             with open(STATE_FILE, "r") as f:
                 state = json.load(f)
             num_sorters_var.set(state.get("num_sorters", num_sorters_var.get()))
+            sglx_host_var.set(state.get("sglx_host", sglx_host_var.get()))
+            sglx_port_var.set(state.get("sglx_port", sglx_port_var.get()))
         except Exception as e:
             print(f"Could not load GUI state: {e}")
 
@@ -394,10 +427,14 @@ def run_online_multi():
     SDM_TRIGGER_BIN_MS = [v.get().strip() for v in sdm_trigger_bin_ms_vars]
     MAX_TEMPLATES = [v.get().strip() for v in max_templates_vars]
     CHANNEL_RANGES = [v.get().strip() for v in channel_range_vars]
+    SGLX_HOST = sglx_host_var.get().strip()
+    SGLX_PORT = sglx_port_var.get().strip()
 
     # Save current state
     state = {
         "num_sorters": n,
+        "sglx_host": SGLX_HOST,
+        "sglx_port": SGLX_PORT,
         "base_paths": [str(p) for p in BASE_PATHS],
         "ks_output_dirs": [str(d) for d in KS_OUTPUT_DIRS],
         "bin_files": [str(p) for p in BIN_FILES],
@@ -436,8 +473,11 @@ def run_online_multi():
         '--oss_input': OSS_DIRS,
         '--decoder_input': [str(d) + '\\' for d in decoder_input_dirs],
         '--spikes_output': [str(d / 'spikeOutput.txt') for d in decoder_input_dirs],
-        '--cuda_output_dir': [str(d) + '\\' for d in cuda_output_dirs]
+        '--cuda_output_dir': [str(d) + '\\' for d in cuda_output_dirs],
+        '--sglx_host': SGLX_HOST,
+        '--sglx_port': SGLX_PORT
     }
+
     if any(SDM_FLAGS):
         sdm_idxs = [i for i, enabled in enumerate(SDM_FLAGS) if enabled]
         sdm_idx = sdm_idxs[0]
@@ -472,6 +512,7 @@ def run_online_multi():
             cmd.extend(v)
         else:
             cmd.extend([k, str(v)])
+    cmd.append('--no_input_gui')
 
     print("Running LSS with:", shlex.join(cmd))
     proc = subprocess.Popen(cmd, shell=True)

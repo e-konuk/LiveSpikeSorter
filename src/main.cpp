@@ -222,13 +222,22 @@ InputParameters parseCmdArgs(int argc, char* argv[]) {
 			}
 			cmdLineParams.sdmDecoderWindowMs = std::stoi(argv[i + 1]);
 		}
-		else if (arg == "--vram_cap") {
+		else if (arg == "--sglx_host") {
 			if (i + 1 >= argc) {
-				std::cout << "Must supply integer (MB) after --vram_cap" << std::endl;
+				std::cout << "Must supply IP address after --sglx_host" << std::endl;
 				exit(EXIT_SUCCESS);
 			}
-			cmdLineParams.iMaxVramMB = std::stoi(argv[i + 1]);
-			std::cout << "VRAM cap set to " << cmdLineParams.iMaxVramMB << " MB" << std::endl;
+			cmdLineParams.sDataAccquisitionHost = argv[i + 1];
+		}
+		else if (arg == "--sglx_port") {
+			if (i + 1 >= argc) {
+				std::cout << "Must supply port number after --sglx_port" << std::endl;
+				exit(EXIT_SUCCESS);
+			}
+			cmdLineParams.uDataAccquisitionPort = static_cast<uint16>(std::stoi(argv[i + 1]));
+		}
+		else if (arg == "--no_input_gui") {
+			cmdLineParams.bSkipInputGui = true;
 		}
 	}
 	

@@ -155,6 +155,14 @@ void OutputGuiTab::UpdateEvents() {
 			m_vfP2P.push_back(payload.P2P);
 		}
 
+		// Drift trace: one point per estimation window
+		if (payload.driftUpdateCt > 0 && payload.driftUpdateCt != m_lastDriftUpdateCt) {
+			std::lock_guard<std::mutex> lk(driftMutex);
+			m_lastDriftUpdateCt = payload.driftUpdateCt;
+			m_vfDriftDepth.push_back(payload.driftShiftUm);
+			m_vfDriftTimeSec.push_back((float)(payload.driftUpdateCt / (double)m_fSampRate));
+		}
+
 		processingTimeMutex.lock();
 		m_vProcessTimes.push_back(payload.processTime);
 		processingTimeMutex.unlock();
@@ -216,13 +224,15 @@ void OutputGuiTab::DrawImGUI(const ImVec2 windowCenter) {
 	static bool showVRMS = false;
 	static bool showP2P = false;
 	static bool showTrialInfo = true;
+	static bool showDrift = false;
 
 	ImGui::Begin("Plot Menu");
 	ImGui::Checkbox("Spike Raster", &showRaster);
 	ImGui::Checkbox("Neuron Info", &showNeuronInfo);
 	ImGui::Checkbox("Processing Times", &showProcessTimes);
-	//ImGui::Checkbox("VRMS", &showVRMS);	
+	//ImGui::Checkbox("VRMS", &showVRMS);
 	ImGui::Checkbox("P2P", &showP2P);
+	ImGui::Checkbox("Drift Trace", &showDrift);
 	//ImGui::Checkbox("Trial Info", &showTrialInfo);
 	ImGui::End();
 
@@ -243,6 +253,9 @@ void OutputGuiTab::DrawImGUI(const ImVec2 windowCenter) {
 
 	if (showP2P)
 		plotP2P(windowCenter, showP2P);
+
+	if (showDrift)
+		plotDriftTrace(windowCenter, showDrift);
 
 	//if (showTrialInfo)
 	//	displayTrialInfo(windowCenter, showTrialInfo);
@@ -468,6 +481,36 @@ void OutputGuiTab::plotP2P(const ImVec2 windowCenter, bool &showP2P) {
 
 	if (ImPlot::BeginPlot("P2P vs. Time", ImVec2(-1, -1))) {
 		ImPlot::PlotLine("P2P", PlotArray, ToShow);
+		ImPlot::EndPlot();
+	}
+	ImGui::End();
+}
+
+void OutputGuiTab::plotDriftTrace(const ImVec2 windowCenter, bool &showDrift) {
+	ImGui::SetNextWindowPos(windowCenter, ImGuiCond_Once, ImVec2(0.5f, 0.5f));
+	ImGui::SetNextWindowSize(ImVec2(500, 360), ImGuiCond_Once);
+	ImGui::SetNextWindowClass(&plotWindowClass);
+	if (!ImGui::Begin("Drift trace", &showDrift)) { ImGui::End(); return; }
+
+	// Snapshot the trace under lock so the receive thread can keep appending.
+	std::vector<float> xs, ys;
+	{
+		std::lock_guard<std::mutex> lk(driftMutex);
+		xs = m_vfDriftTimeSec;
+		ys = m_vfDriftDepth;
+	}
+
+	if (xs.empty()) {
+		ImGui::Text("Waiting for the first drift estimate");
+		ImGui::End();
+		return;
+	}
+
+	ImGui::Text("Latest estimated drift: %.2f um", ys.back());
+
+	if (ImPlot::BeginPlot("Estimated drift vs. time", ImVec2(-1, -1))) {
+		ImPlot::SetupAxes("time (s)", "estimated depth (um)"); // TODO: adjust axes
+		ImPlot::PlotLine("drift", xs.data(), ys.data(), (int)xs.size());
 		ImPlot::EndPlot();
 	}
 	ImGui::End();

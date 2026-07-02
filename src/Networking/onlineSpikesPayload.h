@@ -25,6 +25,12 @@ struct OnlineSpikesPayload {
 	int16_t		nCorrect;
 	double		confidence;
 
+	// Real-time drift estimate (OnlineSpikes->Decoder->GUI). driftShiftUm is the
+	// estimated vertical drift (um) relative to the training frame; driftUpdateCt
+	// is the stream sample count of the last estimate update.
+	float		driftShiftUm;
+	long		driftUpdateCt;
+
 
 	// Using the Cereal serialization library
 	template <class Archive>
@@ -43,7 +49,9 @@ struct OnlineSpikesPayload {
 			label,
 			nTrials,
 			nCorrect,
-			confidence);
+			confidence,
+			driftShiftUm,
+			driftUpdateCt);
 	}
 };
 #endif

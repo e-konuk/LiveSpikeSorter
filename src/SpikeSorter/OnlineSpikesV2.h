@@ -5,6 +5,9 @@
 #include <random>
 #include <future>
 #include <fstream>
+#include <atomic>
+#include <mutex>
+#include <condition_variable>
 
 #include <cublas_v2.h>
 #include <cusolverDn.h>
@@ -47,6 +50,16 @@ private:
 	void loadTemplateMap(std::string filepath);
 	void loadKilosortTrainingData(std::string directoryPath);
 	void loadKilosortClusteringData(std::string directoryPath);
+
+	// --- Real-time drift estimation + correction ---
+	void loadDriftData(std::string directoryPath);            // iKxx, reference fingerprint
+	void accumulateFingerprint(long numSpikesInBatch);        // per-batch (fast loop)
+	void driftWorkerLoop();                                   // worker thread body
+	void estimateDrift(const std::vector<float>& depths,
+	                   const std::vector<float>& amps, long windowEndCt);
+	void buildFingerprint(const std::vector<float>& depths,
+	                      const std::vector<float>& amps, std::vector<float>& F);
+	float registerFingerprint(const std::vector<float>& F);   // -> residual shift (um)
 
 	void fwdMaxPool1d(float* d_matrix, float* d_result, int len, int width);
 	void findMaxAbs(float *input, long length, int *ind, float *val);
@@ -128,6 +141,46 @@ private:
 
 	// Leftover stuff from previous code
 	std::vector<double> activeChannels;
+
+	// --- Real-time drift estimation + correction ---
+	bool  m_driftEnabled;
+	int   m_deviceIndex;              // CUDA device this sorter runs on (for worker thread)
+	float m_driftWindowSeconds;
+	float m_driftMaxShiftUm;
+	long  m_estWindowSamples;         // window length in stream samples
+	long  m_windowStartCt;            // stream ct at start of current window
+	// drift/fingerprint parameters loaded from misc.txt / reference_fingerprint.npy
+	float m_sigInterp;                // RBF width (um)
+	float m_binningDepth;             // depth bin size (um)
+	float m_ycMin, m_ycMax;           // channel y extent (um)
+	float m_dshiftLast;               // training-frame absolute shift (um)
+	long  m_fpDmax;                   // number of depth bins
+	int   m_nAmpBins;                 // number of amplitude bins (20)
+	std::vector<float> m_refFingerprint;  // [dmax*nAmpBins], mean-subtracted along depth
+	bool  m_driftTranspose;           // orientation resolved at startup (equivalence gate)
+
+	// per-window spike accumulation (appended each batch by the fast loop)
+	std::vector<float> m_fpDepths;
+	std::vector<float> m_fpAmps;
+
+	// worker thread + snapshot handoff
+	std::thread m_driftWorker;
+	std::mutex  m_driftMutex;
+	std::condition_variable m_driftCV;
+	std::vector<float> m_snapDepths, m_snapAmps;
+	bool m_driftJobReady;             // a snapshot awaits the worker
+	bool m_driftStop;                 // shutdown flag
+	long m_snapWindowEndCt;           // stream ct at window close (trace timestamp)
+
+	// worker-owned GPU context
+	cublasHandle_t m_driftCublas;
+	cudaStream_t   m_driftStream;
+
+	// published estimate (fast loop reads for the payload)
+	std::atomic<float*> m_activeDriftMatrix;   // current C x C correction matrix
+	float m_totalShiftUm;                      // absolute shift used to build matrix (worker-only)
+	std::atomic<float> m_estDriftUm;           // drift relative to training (um), published
+	std::atomic<long>  m_atomicDriftUpdateCt;  // stream ct of last update
 
 	// Thrust vector for matching to find local maxima, change later to normal device vector
 	thrust::device_vector<long> d_spikeIndices;

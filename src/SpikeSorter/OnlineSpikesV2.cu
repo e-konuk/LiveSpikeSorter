@@ -272,7 +272,28 @@ OnlineSpikesV2::OnlineSpikesV2(
 	spikesFileOut(),
 	recordingOffset(0),
 	substream(params.iSubstream),
-	lookback(0) // this will be set when we read in M
+	lookback(0), // this will be set when we read in M
+	m_driftEnabled(params.bDriftEstimation),
+	m_deviceIndex(params.uSelectedDevice),
+	m_driftWindowSeconds(params.fDriftWindowSeconds),
+	m_driftMaxShiftUm(params.fDriftMaxShiftUm),
+	m_estWindowSamples(0),
+	m_windowStartCt(0),
+	m_sigInterp(20.0f),
+	m_binningDepth(5.0f),
+	m_ycMin(0.0f),
+	m_ycMax(0.0f),
+	m_dshiftLast(0.0f),
+	m_fpDmax(0),
+	m_nAmpBins(20),
+	m_driftTranspose(false),
+	m_driftJobReady(false),
+	m_driftStop(false),
+	m_snapWindowEndCt(0),
+	m_activeDriftMatrix(nullptr),
+	m_totalShiftUm(0.0f),
+	m_estDriftUm(0.0f),
+	m_atomicDriftUpdateCt(0)
 {
 	static const char *ptLabel = { "OnlineSpikesV2::OnlineSpikesV2" };
 
@@ -283,6 +304,16 @@ OnlineSpikesV2::OnlineSpikesV2(
 OnlineSpikesV2::~OnlineSpikesV2()
 {
 	static const char *ptLabel = { "OnlineSpikesV2::~OnlineSpikesV2" };
+
+	// Stop the drift estimation worker before freeing device memory it may use
+	if (m_driftWorker.joinable()) {
+		{
+			std::lock_guard<std::mutex> lk(m_driftMutex);
+			m_driftStop = true;
+		}
+		m_driftCV.notify_all();
+		m_driftWorker.join();
+	}
 
 	// Deallocate Host Memory
 	#define X(type, name, memType, size) \
@@ -379,6 +410,25 @@ void OnlineSpikesV2::initializeSorter(InputParameters params) {
 
 	// No idea what this does ngl
 	for (int i = 0; i < C; i++) activeChannels.push_back(i);
+
+	// --- Real-time drift estimation setup ---
+	m_activeDriftMatrix.store(d_driftMatrix, std::memory_order_release);
+	m_totalShiftUm = m_dshiftLast;
+
+	if (m_driftEnabled) {
+		loadDriftData(params.sInputFolder);   // may disable drift if tensors missing
+	}
+	if (m_driftEnabled) {
+		m_estWindowSamples = (long)(m_driftWindowSeconds * samplingRate);
+		if (m_estWindowSamples < 1) m_estWindowSamples = 1;
+		m_fpDepths.reserve(1 << 16);
+		m_fpAmps.reserve(1 << 16);
+		m_driftWorker = std::thread(&OnlineSpikesV2::driftWorkerLoop, this);
+		std::cout << "[Drift] Real-time drift estimation enabled: window "
+		          << m_driftWindowSeconds << " s (" << m_estWindowSamples
+		          << " samples), max shift " << m_driftMaxShiftUm << " um, "
+		          << m_fpDmax << " depth bins." << std::endl;
+	}
 }
 
 void OnlineSpikesV2::establishDecoderConnection(sockaddr_in mainAddr)
@@ -484,6 +534,13 @@ void OnlineSpikesV2::loadKilosortParameters(std::string directoryPath)
 	numNearestChans = std::stoi(params["numNearestChans"]);
 	Th_learned      = std::stoi(params["Th_learned"]);
 	dt              = std::stoi(params["duplicate_spike_bins"]);
+
+	// Drift-estimation parameters (if present)
+	if (params.count("sig_interp"))    m_sigInterp    = std::stof(params["sig_interp"]);
+	if (params.count("binning_depth")) m_binningDepth = std::stof(params["binning_depth"]);
+	if (params.count("yc_min"))        m_ycMin        = std::stof(params["yc_min"]);
+	if (params.count("yc_max"))        m_ycMax        = std::stof(params["yc_max"]);
+	if (params.count("dshift_last"))   m_dshiftLast   = std::stof(params["dshift_last"]);
 }
 
 void OnlineSpikesV2::loadPreclusterShapes(std::string filepath)
@@ -659,10 +716,224 @@ void OnlineSpikesV2::loadKilosortClusteringData(std::string directoryPath)
 	}
 }
 
+// Sign applied to the measured residual shift
+static const float DRIFT_SIGN = 1.0f;
+
+// Load iKxx and the reference activity fingerprint required for estimation
+void OnlineSpikesV2::loadDriftData(std::string directoryPath)
+{
+	static const char* ptLabel = { "OnlineSpikesV2::loadDriftData" };
+	try {
+		auto npiKxx = cnpy::npy_load(directoryPath + "iKxx.npy");
+		if (npiKxx.shape.size() != 2 || (long)npiKxx.shape[0] != C || (long)npiKxx.shape[1] != C) {
+			std::cout << "[Drift] iKxx.npy has unexpected shape; disabling drift estimation." << std::endl;
+			m_driftEnabled = false;
+			return;
+		}
+		_CUDA_CALL(cudaMemcpy(d_iKxx, npiKxx.data<float>(), (size_t)C * C * sizeof(float), cudaMemcpyHostToDevice));
+
+		auto npRef = cnpy::npy_load(directoryPath + "reference_fingerprint.npy");
+		if (npRef.shape.size() != 2) {
+			std::cout << "[Drift] reference_fingerprint.npy has unexpected shape; disabling drift estimation." << std::endl;
+			m_driftEnabled = false;
+			return;
+		}
+		m_fpDmax   = (long)npRef.shape[0];
+		m_nAmpBins = (int)npRef.shape[1];
+		m_refFingerprint.assign(npRef.data<float>(), npRef.data<float>() + (m_fpDmax * m_nAmpBins));
+		_CUDA_CALL(cudaDeviceSynchronize());
+	}
+	catch (const std::exception& e) {
+		std::cout << "[Drift] Could not load drift tensors (" << e.what()
+		          << "); disabling drift estimation." << std::endl;
+		m_driftEnabled = false;
+	}
+}
+
+void OnlineSpikesV2::accumulateFingerprint(long numSpikesInBatch)
+{
+	for (long i = 0; i < numSpikesInBatch; ++i) {
+		m_fpDepths.push_back(closest_y[i]);
+		m_fpAmps.push_back(spikeAmplitudes[i]);
+	}
+}
+
+// Build a depth x amplitude fingerprint from a window's spikes
+void OnlineSpikesV2::buildFingerprint(const std::vector<float>& depths,
+                                      const std::vector<float>& amps,
+                                      std::vector<float>& F)
+{
+	std::fill(F.begin(), F.end(), 0.0f);
+	const long N = (long)depths.size();
+	if (N == 0) return;
+
+	const float dmin = m_ycMin - 1.0f;
+
+	// amplitude -> percentile rank in [0, 1)
+	std::vector<long> order(N);
+	for (long i = 0; i < N; ++i) order[i] = i;
+	std::sort(order.begin(), order.end(),
+	          [&](long a, long b) { return amps[a] < amps[b]; });
+	std::vector<float> rank(N);
+	for (long r = 0; r < N; ++r) rank[order[r]] = (float)r / (float)N;
+
+	for (long i = 0; i < N; ++i) {
+		long row = (long)floorf((depths[i] - dmin) / m_binningDepth);
+		if (row < 0) row = 0;
+		if (row >= m_fpDmax) row = m_fpDmax - 1;
+		long col = (long)floorf(rank[i] * m_nAmpBins);
+		if (col < 0) col = 0;
+		if (col >= m_nAmpBins) col = m_nAmpBins - 1;
+		F[row * m_nAmpBins + col] += 1.0f;
+	}
+	for (size_t k = 0; k < F.size(); ++k) F[k] = log2f(1.0f + F[k]);
+
+	// mean-subtract along depth, per amplitude column
+	for (int c = 0; c < m_nAmpBins; ++c) {
+		double mean = 0.0;
+		for (long r = 0; r < m_fpDmax; ++r) mean += F[r * m_nAmpBins + c];
+		mean /= (double)m_fpDmax;
+		for (long r = 0; r < m_fpDmax; ++r) F[r * m_nAmpBins + c] -= (float)mean;
+	}
+}
+
+// Cross-correlate window fingerprint against the reference over integer depth-bin shifts
+// Returns the residual shift in MICRONS
+float OnlineSpikesV2::registerFingerprint(const std::vector<float>& F)
+{
+	int n = (int)ceilf(m_driftMaxShiftUm / m_binningDepth);
+	if (n > 15) n = 15;
+	if (n < 1)  n = 1;
+
+	const int dmax = (int)m_fpDmax;
+	const int A = m_nAmpBins;
+
+	std::vector<float> dc(2 * n + 1, 0.0f);
+	for (int t = -n; t <= n; ++t) {
+		double s = 0.0;
+		for (int r = 0; r < dmax; ++r) {
+			int rr = ((r - t) % dmax + dmax) % dmax; // torch.roll(F, t): F_rolled[r] = F[r - t]
+			for (int c = 0; c < A; ++c)
+				s += (double)m_refFingerprint[r * A + c] * (double)F[rr * A + c];
+		}
+		dc[t + n] = (float)s;
+	}
+
+	// x10 Gaussian upsampling to find a sub-bin peak
+	const int up = 10;
+	const int nUp = 2 * n * up + 1;
+	float best = -1e30f, bestBins = 0.0f;
+	for (int k = 0; k < nUp; ++k) {
+		float sf = -(float)n + (float)k * (2.0f * n) / (float)(nUp - 1);
+		double num = 0.0;
+		for (int t = -n; t <= n; ++t) {
+			float w = expf(-0.5f * (sf - (float)t) * (sf - (float)t));
+			num += (double)w * (double)dc[t + n];
+		}
+		if (num > best) { best = (float)num; bestBins = sf; }
+	}
+
+	float shiftUm = bestBins * m_binningDepth;
+	if (shiftUm >  m_driftMaxShiftUm) shiftUm =  m_driftMaxShiftUm;
+	if (shiftUm < -m_driftMaxShiftUm) shiftUm = -m_driftMaxShiftUm;
+	return shiftUm;
+}
+
+// Worker-thread body: waits for a window snapshot, estimates drift, rebuilds the correction matrix
+void OnlineSpikesV2::driftWorkerLoop()
+{
+	static const char* ptLabel = { "OnlineSpikesV2::driftWorkerLoop" };
+
+	_CUDA_CALL(cudaSetDevice(m_deviceIndex));
+	_CUDA_CALL(cudaStreamCreate(&m_driftStream));
+	if (cublasCreate(&m_driftCublas) != CUBLAS_STATUS_SUCCESS)
+		_RUN_ERROR(ptLabel, "Failed to create drift cuBLAS handle");
+	cublasSetStream(m_driftCublas, m_driftStream);
+
+	{
+		std::vector<float> host_static((size_t)C * C), host_test((size_t)C * C);
+		_CUDA_CALL(cudaMemcpy(host_static.data(), d_driftMatrix, (size_t)C * C * sizeof(float), cudaMemcpyDeviceToHost));
+
+		auto maxAbsDiff = [&](bool doTranspose) -> double {
+			ComputeDriftMat(m_driftCublas, m_driftStream, d_xc, d_yc, d_iKxx, d_Kyx,
+			                m_sigInterp, m_dshiftLast, C, d_driftMatrixB, doTranspose);
+			_CUDA_CALL(cudaStreamSynchronize(m_driftStream));
+			_CUDA_CALL(cudaMemcpy(host_test.data(), d_driftMatrixB, (size_t)C * C * sizeof(float), cudaMemcpyDeviceToHost));
+			double m = 0.0;
+			for (size_t i = 0; i < host_test.size(); ++i)
+				m = std::max(m, (double)fabs(host_test[i] - host_static[i]));
+			return m;
+		};
+
+		double diffNo  = maxAbsDiff(false);
+		double diffYes = maxAbsDiff(true);
+		m_driftTranspose = (diffYes < diffNo);
+		std::cout << "[Drift] Matrix orientation gate: maxdiff(M)=" << diffNo
+		          << " maxdiff(M^T)=" << diffYes << " -> using "
+		          << (m_driftTranspose ? "M^T" : "M") << std::endl;
+		if (std::min(diffNo, diffYes) > 1e-2)
+			std::cout << "[Drift] WARNING: neither orientation matches drift_matrix.npy well; "
+			             "check sig_interp/iKxx/dshift_last exports." << std::endl;
+	}
+
+	std::vector<float> depths, amps;
+	long endCt = 0;
+	for (;;) {
+		{
+			std::unique_lock<std::mutex> lk(m_driftMutex);
+			m_driftCV.wait(lk, [&] { return m_driftJobReady || m_driftStop; });
+			if (m_driftStop) break;
+			depths = std::move(m_snapDepths);
+			amps   = std::move(m_snapAmps);
+			endCt  = m_snapWindowEndCt;
+			m_snapDepths.clear();
+			m_snapAmps.clear();
+			m_driftJobReady = false;
+		}
+		estimateDrift(depths, amps, endCt);
+	}
+
+	cublasDestroy(m_driftCublas);
+	cudaStreamDestroy(m_driftStream);
+}
+
+// Register a window, integrate the estimate, rebuild + publish the drift matrix.
+void OnlineSpikesV2::estimateDrift(const std::vector<float>& depths,
+                                   const std::vector<float>& amps, long windowEndCt)
+{
+	static const char *ptLabel = { "OnlineSpikesV2::estimateDrift" };
+	const long minSpikes = 300;
+	if ((long)depths.size() < minSpikes) {
+		// Too few spikes to trust: keep the current matrix and estimate.
+		return;
+	}
+
+	std::vector<float> F((size_t)m_fpDmax * m_nAmpBins, 0.0f);
+	buildFingerprint(depths, amps, F);
+
+	float residualUm = registerFingerprint(F);
+
+	m_totalShiftUm += DRIFT_SIGN * residualUm;
+	float rel = m_totalShiftUm - m_dshiftLast;
+	if (rel >  m_driftMaxShiftUm) { rel =  m_driftMaxShiftUm; m_totalShiftUm = m_dshiftLast + rel; }
+	if (rel < -m_driftMaxShiftUm) { rel = -m_driftMaxShiftUm; m_totalShiftUm = m_dshiftLast + rel; }
+
+	// Build the new matrix into the inactive buffer, then publish via pointer swap.
+	float* active = m_activeDriftMatrix.load(std::memory_order_acquire);
+	float* target = (active == d_driftMatrix) ? d_driftMatrixB : d_driftMatrix;
+	ComputeDriftMat(m_driftCublas, m_driftStream, d_xc, d_yc, d_iKxx, d_Kyx,
+	                m_sigInterp, m_totalShiftUm, C, target, m_driftTranspose);
+	_CUDA_CALL(cudaStreamSynchronize(m_driftStream));
+
+	m_activeDriftMatrix.store(target, std::memory_order_release);
+	m_estDriftUm.store(rel, std::memory_order_relaxed);
+	m_atomicDriftUpdateCt.store(windowEndCt, std::memory_order_relaxed);
+}
+
 void OnlineSpikesV2::runSpikeSorting()
 {
 	static const char *ptLabel = { "OnlineSpikesV2::runSpikeSorting" };
-	
+
 	long 	processedCt, // Most recent stream sample count that has been processed
 			allowedCt, // Samples we are behind
 			skipCounter = 0, // Number of times we skipped
@@ -693,6 +964,7 @@ void OnlineSpikesV2::runSpikeSorting()
 	// Get the latest sample count from Spike GLX
 	latestCt = sglxSock->getStreamSampleCt(IMEC, osParams);
 	processedCt = latestCt;
+	m_windowStartCt = latestCt; // start of the first drift-estimation window
 
 	// Main spike sorting loop
 	while (true) {
@@ -800,10 +1072,12 @@ void OnlineSpikesV2::runSpikeSorting()
 		}
 		_CUDA_CALL(cudaDeviceSynchronize());
 
-		// Drift correct
+		// Drift correct. The matrix pointer is hot-swapped by the drift worker
+		// (double-buffered); read it once per batch via an acquire load.
 		{
 			Timer timer("driftCorrection()");
-			matMul(cublasHandle, d_driftMatrix, d_fetchBuf, d_fetchBuf2, C, C, currBatchNumSamples);
+			float* driftMat = m_activeDriftMatrix.load(std::memory_order_acquire);
+			matMul(cublasHandle, driftMat, d_fetchBuf, d_fetchBuf2, C, C, currBatchNumSamples);
 		}
 		_CUDA_CALL(cudaDeviceSynchronize());
 		
@@ -821,19 +1095,42 @@ void OnlineSpikesV2::runSpikeSorting()
 		// Save the spikes into times, templates, amplitudes
 		saveSpikes(numSpikes, latestCt - currBatchNumSamples + 1, currBatchNumSamples - minWindow, times, templates, amplitudes);
 
+		// Drift estimation: accumulate this batch's spikes into the current
+		// window and, when the window is full, hand a snapshot to the worker.
+		if (m_driftEnabled) {
+			accumulateFingerprint(numSpikes);
+			if (latestCt - m_windowStartCt >= m_estWindowSamples) {
+				{
+					std::lock_guard<std::mutex> lk(m_driftMutex);
+					if (!m_driftJobReady) {          // worker idle: hand off
+						m_snapDepths.swap(m_fpDepths);
+						m_snapAmps.swap(m_fpAmps);
+						m_snapWindowEndCt = latestCt;
+						m_driftJobReady = true;
+						m_driftCV.notify_one();
+					}
+				}
+				m_fpDepths.clear();
+				m_fpAmps.clear();
+				m_windowStartCt = latestCt;
+			}
+		}
+
 		clock_gettime(batchAfter);
 		long processTime = GetTimeDiff(batchAfter, batchBefore);
 
 		// Send relevant data to decoder
-		OnlineSpikesPayload payload = { recordingOffset, 
+		OnlineSpikesPayload payload = { recordingOffset,
 								latestCt,
 								times,
 								templates,
 								amplitudes,
 								rootMeanSquared,
 								p2p,
-								processTime 
+								processTime
 		};
+		payload.driftShiftUm  = m_estDriftUm.load(std::memory_order_relaxed);
+		payload.driftUpdateCt = m_atomicDriftUpdateCt.load(std::memory_order_relaxed);
 
 		sendPayload(&imecFm, payload, decoderImecAddr);
 		//duplicate check in save spikes

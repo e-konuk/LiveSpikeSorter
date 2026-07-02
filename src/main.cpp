@@ -239,6 +239,23 @@ InputParameters parseCmdArgs(int argc, char* argv[]) {
 		else if (arg == "--no_input_gui") {
 			cmdLineParams.bSkipInputGui = true;
 		}
+		else if (arg == "--drift_estimation") {
+			cmdLineParams.bDriftEstimation = true;
+		}
+		else if (arg == "--drift_window_s") {
+			if (i + 1 >= argc) {
+				std::cout << "Must supply a number of seconds after --drift_window_s" << std::endl;
+				exit(EXIT_SUCCESS);
+			}
+			cmdLineParams.fDriftWindowSeconds = static_cast<float>(std::stof(argv[i + 1]));
+		}
+		else if (arg == "--drift_max_shift_um") {
+			if (i + 1 >= argc) {
+				std::cout << "Must supply a shift in microns after --drift_max_shift_um" << std::endl;
+				exit(EXIT_SUCCESS);
+			}
+			cmdLineParams.fDriftMaxShiftUm = static_cast<float>(std::stof(argv[i + 1]));
+		}
 	}
 	
 	// second pass through for args that depend on some other args

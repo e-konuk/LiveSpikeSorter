@@ -635,9 +635,55 @@ void DriftCorrectOnGPU(cublasHandle_t& Handle, float *matA, float *matB, float *
 
 }
 
-void ComputeDriftMat(int y_shift, float* d_result)
+// One thread per (i, j) entry of the C x C RBF kernel. Row i uses the shifted
+// channel coordinate (yc[i] - shiftUm); column j uses the original coordinate.
+// Matches Kilosort kernel2D_torch: Kyx[i,j] = exp(-||yp[i]-xp[j]||^2 / (2*sig^2))
+// with yp = (xc, yc - shift), xp = (xc, yc).
+__global__ void build_Kyx_kernel(const float* xc, const float* yc, float shiftUm,
+                                 float invTwoSig2, int C, float* Kyx)
+{
+	int i = blockIdx.y * blockDim.y + threadIdx.y; // row
+	int j = blockIdx.x * blockDim.x + threadIdx.x; // col
+	if (i < C && j < C) {
+		float dx = xc[i] - xc[j];
+		float dy = (yc[i] - shiftUm) - yc[j];
+		Kyx[i * C + j] = expf(-(dx * dx + dy * dy) * invTwoSig2);
+	}
+}
+
+// Square out-of-place transpose: out[j,i] = in[i,j] (C x C), on a given stream.
+__global__ void transpose_square_kernel(const float* in, float* out, int C)
+{
+	int i = blockIdx.y * blockDim.y + threadIdx.y; // row of in
+	int j = blockIdx.x * blockDim.x + threadIdx.x; // col of in
+	if (i < C && j < C) {
+		out[j * C + i] = in[i * C + j];
+	}
+}
+
+void ComputeDriftMat(cublasHandle_t& handle, cudaStream_t stream,
+                     const float* d_xc, const float* d_yc, const float* d_iKxx,
+                     float* d_Kyx, float sigInterp, float shiftUm, int C,
+                     float* d_result, bool transposeResult)
 {
 	static const char *ptLabel = { "ComputeDriftMat" };
+
+	dim3 block(16, 16);
+	dim3 grid((C + block.x - 1) / block.x, (C + block.y - 1) / block.y);
+
+	const float invTwoSig2 = 1.0f / (2.0f * sigInterp * sigInterp);
+	build_Kyx_kernel <<<grid, block, 0, stream>>> (d_xc, d_yc, shiftUm, invTwoSig2, C, d_Kyx);
+
+	// d_result = Kyx @ iKxx  (row-major). matMul uses the handle's stream.
+	cublasSetStream(handle, stream);
+	matMul(handle, d_Kyx, d_iKxx, d_result, C, C, C);
+
+	if (transposeResult) {
+		// d_Kyx is free to reuse as scratch: d_result -> transpose -> d_Kyx -> d_result
+		transpose_square_kernel <<<grid, block, 0, stream>>> (d_result, d_Kyx, C);
+		_CUDA_CALL(cudaMemcpyAsync(d_result, d_Kyx, (size_t)C * C * sizeof(float),
+		                           cudaMemcpyDeviceToDevice, stream));
+	}
 }
 
 void WhitenOnGPU(cublasHandle_t& Handle, float *matA, float *matB, float *matC, long lW, long lC) {

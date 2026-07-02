@@ -117,6 +117,7 @@ private:
 	void plotProcessTimes(const ImVec2 windowCenter, bool &showProcessTimes);
 	void plotVRMS(const ImVec2 windowCenter, bool &showVRMS);
 	void plotP2P(const ImVec2 windowCenter, bool &showP2P);
+	void plotDriftTrace(const ImVec2 windowCenter, bool &showDrift);
 	void displayTrialInfo(const ImVec2 windowCenter, bool &showTrialInfo);
 	void setMaxScanWindow(long m_lMaxScanWindow, float m_fSampRate);
 
@@ -156,6 +157,12 @@ private:
 	int					maxScanWindow;
 
 	std::mutex processingTimeMutex;
+
+	// Drift trace (time vs estimated depth), fed by the sorter's drift estimator
+	std::vector<float>  m_vfDriftDepth;    // estimated drift (um) relative to training
+	std::vector<float>  m_vfDriftTimeSec;  // time (s) of each estimate
+	std::mutex          driftMutex;
+	long                m_lastDriftUpdateCt = -1;
 };
 
 

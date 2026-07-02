@@ -74,5 +74,10 @@ struct InputParameters {
 
 	// Skip the ImGui input window and use CLI-populated params directly
 	bool						bSkipInputGui{ false };
+
+	// Real-time drift estimation + correction
+	bool						bDriftEstimation{ false };
+	float						fDriftWindowSeconds{ 60.0f };
+	float						fDriftMaxShiftUm{ 60.0f };
 };
 #endif

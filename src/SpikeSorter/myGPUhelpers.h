@@ -16,6 +16,16 @@ void WhitenOnGPU(cublasHandle_t& Handle, float *fW, float *fYW, float *fY, long 
 void matMul(cublasHandle_t& handle, const float* d_A, const float* d_B, float* d_C, int M, int K, int N);
 long RemoveDCGPU(cublasHandle_t& Handle, float *fY, float *fDC, long lW, long lC, long lCt, float *OnesArray, float *Means);
 void transpose(float* d_A, float* d_At, int numRows, int numCols);
+// Build the rigid drift-correction matrix M = kernel2D(shifted_yc, yc, sig) @ iKxx
+// for a single global vertical shift (microns), mirroring Kilosort's
+// get_drift_matrix for nblocks==1. d_Kyx is C*C scratch. If transposeResult is
+// true, d_result receives M^T (used to match the on-disk drift_matrix.npy
+// convention; resolved empirically at startup). Kernel + matmul run on `stream`;
+// `handle` is bound to `stream` internally.
+void ComputeDriftMat(cublasHandle_t& handle, cudaStream_t stream,
+                     const float* d_xc, const float* d_yc, const float* d_iKxx,
+                     float* d_Kyx, float sigInterp, float shiftUm, int C,
+                     float* d_result, bool transposeResult);
 void highpass(cufftHandle planForward, cufftHandle planInverse, float* d_batch, float* d_highpassed, const std::complex<float>* fwav, cufftComplex* d_hpworkspace, long C, long W);
 void meanRemove(float* d_batch, float* d_workspace, long W, long C);
 void updateResidual(

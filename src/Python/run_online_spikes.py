@@ -56,6 +56,31 @@ tk.Label(daq_frame, text="SGLX Port:").grid(row=2, column=0, padx=5, pady=5, sti
 tk.Entry(daq_frame, textvariable=sglx_port_var, width=15).grid(row=2, column=1, sticky="w")
 tk.Button(daq_frame, text="?", command=lambda: show_hint("SGLX_PORT"), width=3).grid(row=2, column=3)
 
+# Drift-correction parameters (shared across all sorters)
+drift_enabled_var = tk.BooleanVar(value=False)
+drift_window_var = tk.StringVar(value="60")
+drift_max_shift_var = tk.StringVar(value="50")
+
+drift_frame = tk.Frame(root, borderwidth=1, relief="groove")
+drift_frame.grid(row=1, column=4, columnspan=4, padx=5, pady=5, sticky="w")
+
+tk.Label(drift_frame, text="Drift Correction (shared)", font=("TkDefaultFont", 9, "bold")).grid(
+    row=0, column=0, columnspan=4, padx=5, pady=(5, 2), sticky="w"
+)
+
+tk.Checkbutton(drift_frame, text="Real-time drift estimation", variable=drift_enabled_var).grid(
+    row=1, column=0, columnspan=2, padx=5, pady=5, sticky="w"
+)
+tk.Button(drift_frame, text="?", command=lambda: show_hint("DRIFT_ENABLED"), width=3).grid(row=1, column=3)
+
+tk.Label(drift_frame, text="Window (s):").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+tk.Entry(drift_frame, textvariable=drift_window_var, width=10).grid(row=2, column=1, sticky="w")
+tk.Button(drift_frame, text="?", command=lambda: show_hint("DRIFT_WINDOW"), width=3).grid(row=2, column=3)
+
+tk.Label(drift_frame, text="Max shift (um):").grid(row=3, column=0, padx=5, pady=5, sticky="w")
+tk.Entry(drift_frame, textvariable=drift_max_shift_var, width=10).grid(row=3, column=1, sticky="w")
+tk.Button(drift_frame, text="?", command=lambda: show_hint("DRIFT_MAX_SHIFT"), width=3).grid(row=3, column=3)
+
 # Notebook for sorter tabs
 toolkit = ttk.Notebook(root)
 toolkit.grid(row=2, column=0, columnspan=4, padx=5, pady=5, sticky="nsew")
@@ -92,7 +117,20 @@ HINTS = {
     "SGLX_HOST": ("The IP address of the machine running SpikeGLX. If SpikeGLX is "
                   "running on this same machine, leave as 127.0.0.1. Shared by all "
                   "sorters (they use one SpikeGLX connection)."),
-    "SGLX_PORT": ("The port SpikeGLX is streaming on. Shared by all sorters.")
+    "SGLX_PORT": ("The port SpikeGLX is streaming on. Shared by all sorters."),
+    "DRIFT_ENABLED": ("Enable real-time rigid drift estimation + correction. The "
+                      "sorter accumulates the depth/amplitude of detected spikes "
+                      "over a sliding window, registers that activity fingerprint "
+                      "against the training recording to estimate a vertical shift "
+                      "(um), and rebuilds the drift-correction matrix live. A drift "
+                      "trace (time vs estimated depth) is shown in the output GUI. "
+                      "Shared by all sorters."),
+    "DRIFT_WINDOW": ("Length in seconds of the sliding window used to estimate "
+                     "drift. Longer = more spikes = more robust estimate but slower "
+                     "to react. Targets slow drift; ~60 s is a good starting point."),
+    "DRIFT_MAX_SHIFT": ("Maximum vertical drift (microns) the estimator will apply "
+                        "in either direction. Estimates are clamped to this range to "
+                        "reject spurious registration peaks.")
 }
 
 def show_hint(key):
@@ -200,6 +238,21 @@ def build_tab(frame, idx):
     ).grid(row=row, column=3)
     row += 1
 
+    # BASE_PATH
+    tk.Label(frame, text="BASE_PATH:").grid(
+        row=row, column=0, padx=5, pady=5, sticky="w"
+    )
+    tk.Entry(frame, textvariable=base_path_vars[idx], width=50).grid(
+        row=row, column=1
+    )
+    tk.Button(
+        frame, text="Browse", command=lambda i=idx: browse_directory(i)
+    ).grid(row=row, column=2)
+    tk.Button(
+        frame, text="?", command=lambda i=idx: show_hint("BASE"), width=3
+    ).grid(row=row, column=3)
+    row += 1
+
     # Template selection sub-frame (groups the two template-subsetting filters)
     template_frame = tk.Frame(frame, borderwidth=1, relief="sunken")
     template_frame.grid(row=row, column=0, columnspan=4, padx=5, pady=5, sticky="w")
@@ -230,21 +283,6 @@ def build_tab(frame, idx):
     tk.Button(
         template_frame, text="?", command=lambda i=idx: show_hint("CHANNEL_RANGE"), width=3
     ).grid(row=2, column=3)
-
-    # BASE_PATH
-    tk.Label(frame, text="BASE_PATH:").grid(
-        row=row, column=0, padx=5, pady=5, sticky="w"
-    )
-    tk.Entry(frame, textvariable=base_path_vars[idx], width=50).grid(
-        row=row, column=1
-    )
-    tk.Button(
-        frame, text="Browse", command=lambda i=idx: browse_directory(i)
-    ).grid(row=row, column=2)
-    tk.Button(
-        frame, text="?", command=lambda i=idx: show_hint("BASE"), width=3
-    ).grid(row=row, column=3)
-    row += 1
 
     # SDM toggle
     tk.Checkbutton(
@@ -374,6 +412,9 @@ def main():
             num_sorters_var.set(state.get("num_sorters", num_sorters_var.get()))
             sglx_host_var.set(state.get("sglx_host", sglx_host_var.get()))
             sglx_port_var.set(state.get("sglx_port", sglx_port_var.get()))
+            drift_enabled_var.set(state.get("drift_enabled", drift_enabled_var.get()))
+            drift_window_var.set(state.get("drift_window_s", drift_window_var.get()))
+            drift_max_shift_var.set(state.get("drift_max_shift_um", drift_max_shift_var.get()))
         except Exception as e:
             print(f"Could not load GUI state: {e}")
 
@@ -429,12 +470,18 @@ def run_online_multi():
     CHANNEL_RANGES = [v.get().strip() for v in channel_range_vars]
     SGLX_HOST = sglx_host_var.get().strip()
     SGLX_PORT = sglx_port_var.get().strip()
+    DRIFT_ENABLED = drift_enabled_var.get()
+    DRIFT_WINDOW_S = drift_window_var.get().strip()
+    DRIFT_MAX_SHIFT_UM = drift_max_shift_var.get().strip()
 
     # Save current state
     state = {
         "num_sorters": n,
         "sglx_host": SGLX_HOST,
         "sglx_port": SGLX_PORT,
+        "drift_enabled": DRIFT_ENABLED,
+        "drift_window_s": DRIFT_WINDOW_S,
+        "drift_max_shift_um": DRIFT_MAX_SHIFT_UM,
         "base_paths": [str(p) for p in BASE_PATHS],
         "ks_output_dirs": [str(d) for d in KS_OUTPUT_DIRS],
         "bin_files": [str(p) for p in BIN_FILES],
@@ -499,7 +546,12 @@ def run_online_multi():
             arguments['--sdm_baseline_min_seconds'] = SDM_BASELINE_MIN_SECONDS[sdm_idx]
         if SDM_TRIGGER_BIN_MS[sdm_idx]:
             arguments['--sdm_trigger_bin_ms'] = SDM_TRIGGER_BIN_MS[sdm_idx]
-   
+
+    if DRIFT_ENABLED:
+        if DRIFT_WINDOW_S:
+            arguments['--drift_window_s'] = DRIFT_WINDOW_S
+        if DRIFT_MAX_SHIFT_UM:
+            arguments['--drift_max_shift_um'] = DRIFT_MAX_SHIFT_UM
 
     script_dir = pathlib.Path(__file__).parent.resolve()
     # Go back exactly two levels to reach the project root and build path to executable 
@@ -513,6 +565,8 @@ def run_online_multi():
         else:
             cmd.extend([k, str(v)])
     cmd.append('--no_input_gui')
+    if DRIFT_ENABLED:
+        cmd.append('--drift_estimation')
 
     print("Running LSS with:", shlex.join(cmd))
     proc = subprocess.Popen(cmd, shell=True)
@@ -573,6 +627,40 @@ def cluster_centroids_pca_compute(templates, Wall, pc_feature_ind):
         centroids[t, :] = (weights[:, None] * W_sub).sum(axis=0) / wsum
     
     return centroids
+
+def build_drift_fingerprint(depths, amps, yc_min, yc_max, binning_depth, n_amp_bins=20):
+    """Build a depth x amplitude activity 'fingerprint' for drift registration.
+
+    Mirrors, byte-for-byte in convention, what the C++ sorter's drift estimator
+    builds live over each window (see OnlineSpikesV2 estimateDrift):
+      - depth bins of width `binning_depth`, starting at dmin = yc_min - 1,
+        with dmax = 1 + ceil((yc_max - dmin)/binning_depth) bins,
+      - `n_amp_bins` amplitude bins assigned by PERCENTILE RANK of the amplitude
+        (self-normalizing, so the online OMP amplitude scale need not match
+        Kilosort's detection-amplitude scale),
+      - cell value = log2(1 + count),
+      - mean-subtracted along the depth axis per amplitude column (matches
+        Kilosort align_block2's `Fg - Fg.mean(1)`).
+    """
+    depths = np.asarray(depths, dtype=np.float64)
+    amps   = np.asarray(amps,   dtype=np.float64)
+    dmin = yc_min - 1.0
+    dmax = int(1 + np.ceil((yc_max - dmin) / binning_depth))
+    F = np.zeros((dmax, n_amp_bins), dtype=np.float64)
+    if depths.size > 0:
+        rows = np.floor((depths - dmin) / binning_depth).astype(np.int64)
+        rows = np.clip(rows, 0, dmax - 1)
+        # amplitude -> percentile rank in [0, 1)
+        order = np.argsort(amps, kind='mergesort')
+        ranks = np.empty(amps.size, dtype=np.float64)
+        ranks[order] = np.arange(amps.size) / float(amps.size)
+        cols = np.floor(ranks * n_amp_bins).astype(np.int64)
+        cols = np.clip(cols, 0, n_amp_bins - 1)
+        np.add.at(F, (rows, cols), 1.0)
+    F = np.log2(1.0 + F)
+    F -= F.mean(axis=0, keepdims=True)   # mean-subtract along depth
+    return F
+
 
 def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
                          META_FILES, CHANMAP_FILES, RERUN_FLAGS,
@@ -664,11 +752,27 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
         np.save(oss_in / 'yc.npy', yc)
         np.save(oss_in / 'preclustered_template_waveforms.npy', pre_wf)
         np.save(oss_in / 'cluster_centroids_pca.npy', cluster_centroids_pca)
+        # --- Real-time drift estimation exports ---
+        iKxx = np.ascontiguousarray(np.array(ops['iKxx'], dtype=np.float32))
+        np.save(oss_in / 'iKxx.npy', iKxx)
+
+        binning_depth = float(ops['settings']['binning_depth'])
+        sig_interp    = float(ops['settings']['sig_interp'])
+        yc_min = float(np.min(yc)); yc_max = float(np.max(yc))
+        ref_fp = build_drift_fingerprint(spike_positions[:, 1], amplitudes,
+                                         yc_min, yc_max, binning_depth)
+        np.save(oss_in / 'reference_fingerprint.npy', ref_fp.astype(np.float32))
+
         with open(oss_in / 'misc.txt', 'w') as f:
             f.write(f"nt0min:{ops['nt0min']}\n")
             f.write(f"numNearestChans:{ops['settings']['nearest_chans']}\n")
             f.write(f"Th_learned:{ops['Th_learned']}\n")
             f.write(f"duplicate_spike_bins:{ops['duplicate_spike_bins']}\n")
+            f.write(f"sig_interp:{sig_interp}\n")
+            f.write(f"binning_depth:{binning_depth}\n")
+            f.write(f"yc_min:{yc_min}\n")
+            f.write(f"yc_max:{yc_max}\n")
+            f.write(f"dshift_last:{float(dshift[-1])}\n")
 
         # Optionally subset preclustered templates for lower-spec GPUs and/or
         # to focus on a probe channel range. The two filters compose: the

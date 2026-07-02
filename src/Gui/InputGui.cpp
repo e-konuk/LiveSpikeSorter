@@ -93,6 +93,11 @@ InputGUI::InputGUI(InputParameters cmdLineParams)
 
 	Params.bSkipInputGui = cmdLineParams.bSkipInputGui;
 
+	// Real-time drift estimation + correction (populated from CLI flags)
+	Params.bDriftEstimation = cmdLineParams.bDriftEstimation;
+	Params.fDriftWindowSeconds = cmdLineParams.fDriftWindowSeconds;
+	Params.fDriftMaxShiftUm = cmdLineParams.fDriftMaxShiftUm;
+
 	// TODO: remove the marked entries from InputParameters and remove any dependencies on them
 	/* -------- fixed defaults -------- */
 	Params.sDataAccquisitionHost = cmdLineParams.sDataAccquisitionHost.empty() ? _LOCAL_HOST : cmdLineParams.sDataAccquisitionHost;

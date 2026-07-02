@@ -59,6 +59,9 @@ enum MemoryType {
 	X(float, d_Wall3, Device, unclu_T * K * C) \
 	X(float, d_templateWaveforms, Device, unclu_T * M * C) \
 	X(float, d_driftMatrix, Device, C * C) \
+	X(float, d_driftMatrixB, Device, C * C) \
+	X(float, d_iKxx, Device, C * C) \
+	X(float, d_Kyx, Device, C * C) \
 	X(float, d_nm, Device, unclu_T) \
 	X(float, d_batchPCA, Device, C * K * W) \
 	X(float, d_maxAtTime, Device, W) \

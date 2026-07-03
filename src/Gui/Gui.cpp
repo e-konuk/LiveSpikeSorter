@@ -492,7 +492,7 @@ static void BuildDockLayout(ImGuiID dockspace_id)
 	float iconRatio = ImClamp(ICON_DISPLAY_W / (vp->Size.x * LAYOUT_LEFT_COL_FRAC), 0.1f, 0.5f);
 	ImGui::DockBuilderSplitNode(bot_left, ImGuiDir_Left, iconRatio, &icon_node, &neurons_node);
 
-	// Step 4: split right column top (processing times) / bottom (spike stats)
+	// Step 4: split right column top (processing times, drift trace) / bottom (spike stats)
 	ImGuiID top_right, bot_right;
 	ImGui::DockBuilderSplitNode(right, ImGuiDir_Up, LAYOUT_RIGHT_TOP_FRAC, &top_right, &bot_right);
 
@@ -502,6 +502,7 @@ static void BuildDockLayout(ImGuiID dockspace_id)
 	ImGui::DockBuilderDockWindow("LSS Icon",                     icon_node);
 	ImGui::DockBuilderDockWindow("Neurons",                      neurons_node);
 	ImGui::DockBuilderDockWindow("Processing time distribution", top_right);
+	ImGui::DockBuilderDockWindow("Drift trace",                  top_right);
 	ImGui::DockBuilderFinish(dockspace_id);
 
 	g_rasterDockNode = top_left;

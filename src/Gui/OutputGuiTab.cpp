@@ -487,8 +487,8 @@ void OutputGuiTab::plotP2P(const ImVec2 windowCenter, bool &showP2P) {
 }
 
 void OutputGuiTab::plotDriftTrace(const ImVec2 windowCenter, bool &showDrift) {
-	ImGui::SetNextWindowPos(windowCenter, ImGuiCond_Once, ImVec2(0.5f, 0.5f));
-	ImGui::SetNextWindowSize(ImVec2(500, 360), ImGuiCond_Once);
+	ImGui::SetNextWindowPos(windowCenter, ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
+	ImGui::SetNextWindowSize(ImVec2(500, 360), ImGuiCond_FirstUseEver);
 	ImGui::SetNextWindowClass(&plotWindowClass);
 	if (!ImGui::Begin("Drift trace", &showDrift)) { ImGui::End(); return; }
 
@@ -509,7 +509,11 @@ void OutputGuiTab::plotDriftTrace(const ImVec2 windowCenter, bool &showDrift) {
 	ImGui::Text("Latest estimated drift: %.2f um", ys.back());
 
 	if (ImPlot::BeginPlot("Estimated drift vs. time", ImVec2(-1, -1))) {
-		ImPlot::SetupAxes("time (s)", "estimated depth (um)"); // TODO: adjust axes
+		ImPlot::SetupAxes("Time (hh:mm:ss)", "estimated depth (um)"); 
+		
+		ImPlot::SetupAxisFormat(ImAxis_X1, RasterTimeAxisFormatter); // Adjusted to show in hh:mm:ss format
+		ImPlot::SetupAxisLimits(ImAxis_X1, xs.front(), xs.back(), ImPlotCond_Always);
+		
 		ImPlot::PlotLine("drift", xs.data(), ys.data(), (int)xs.size());
 		ImPlot::EndPlot();
 	}

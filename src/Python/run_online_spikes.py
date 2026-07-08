@@ -12,6 +12,14 @@ import os
 import shlex
 from kilosort.preprocessing import get_drift_matrix
 from kilosort.template_matching import prepare_extract
+from kilosort.parameters import DEFAULT_SETTINGS
+from kilosort.run_kilosort import (
+    set_files, setup_logger as ks_setup_logger, logger as ks_logger,
+    initialize_ops, compute_preprocessing, compute_drift_correction,
+    detect_spikes, cluster_spikes, save_sorting,
+)
+from kilosort.gui.sanity_plots import PlotWindow, plot_drift_amount, plot_drift_scatter
+from qtpy import QtWidgets
 import copy
 import matplotlib.pyplot as plt
 import tkinter as tk
@@ -662,6 +670,69 @@ def build_drift_fingerprint(depths, amps, yc_min, yc_max, binning_depth, n_amp_b
     return F
 
 
+def save_kilosort_drift_plots(dshift, st0, settings):
+    """Save drift_amount.png / drift_scatter.png into settings['results_dir']
+    using Kilosort4's own plotting code (kilosort.gui.sanity_plots), unmodified.
+    """
+    if dshift is None or st0 is None:
+        print("Drift correction disabled (nblocks=0); skipping drift plots.")
+        return
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    drift_amount_window = PlotWindow(width=400, height=400, title='Drift Amount')
+    drift_scatter_window = PlotWindow(width=1500, height=700, title='Drift Scatter',
+                                      background='w')
+    plot_drift_amount(drift_amount_window, dshift, settings)
+    plot_drift_scatter(drift_scatter_window, st0, settings)
+    app.processEvents()
+
+
+def run_kilosort_with_drift_plots(settings, probe_name=None, results_dir=None,
+                                  filename=None, data_dtype=None, do_CAR=True,
+                                  invert_sign=False, device=None):
+    """Runs the same pipeline as kilosort.run_kilosort(), but captures the
+    drift-correction outputs (dshift, st0) in order to save the same
+    drift_amount.png / drift_scatter.png the Kilosort4 GUI shows mid-run.
+
+    kilosort.run_kilosort() has no hook for intermediate results, so this
+    mirrors its body step-for-step -- the same public functions, in the same
+    order, with the same RNG seeding it uses right before drift correction
+    (matching kilosort.gui.sorter.KiloSortWorker.run() too) -- so the drift
+    estimate here is identical to a full offline Kilosort4 GUI/CLI run on the
+    same recording, not just visually similar.
+    """
+    settings = {**DEFAULT_SETTINGS, **settings}
+    filename, data_dir, results_dir, probe = set_files(
+        settings, filename, None, probe_name, None, results_dir)
+    ks_setup_logger(results_dir)
+
+    if data_dtype is None:
+        data_dtype = 'int16'
+    if device is None:
+        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    if probe['chanMap'].max() >= settings['n_chan_bin']:
+        raise ValueError(
+            'Largest value of chanMap exceeds channel count of data, '
+            'make sure chanMap is 0-indexed.')
+
+    tic0 = time.time()
+    ops = initialize_ops(settings, probe, data_dtype, do_CAR, invert_sign,
+                         device, False)
+    ops = compute_preprocessing(ops, device, tic0=tic0)
+
+    np.random.seed(1)
+    torch.cuda.manual_seed_all(1)
+    torch.random.manual_seed(1)
+    ops, bfile, st0 = compute_drift_correction(ops, device, tic0=tic0)
+
+    ops['settings']['results_dir'] = str(results_dir)
+    save_kilosort_drift_plots(ops.get('dshift'), st0, ops['settings'])
+
+    st, tF, _, _ = detect_spikes(ops, results_dir, device, bfile, tic0=tic0)
+    clu, Wall = cluster_spikes(results_dir, st, tF, ops, device, bfile, ks_logger,
+                               tic0=tic0)
+    save_sorting(ops, results_dir, st, clu, tF, Wall, bfile.imin, tic0)
+
+
 def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
                          META_FILES, CHANMAP_FILES, RERUN_FLAGS,
                          MAX_TEMPLATES=None, CHANNEL_RANGES=None):
@@ -676,10 +747,10 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
             meta = parse_bin_meta_file(META_FILES[i])
             start = time.time()
             settings = {'data_dir': str(base / 'imec_raw'), 'n_chan_bin': meta['nSavedChans']}
-            kilosort.run_kilosort(settings=settings,
-                                  probe_name=CHANMAP_FILES[i],
-                                  results_dir=str(ks_out),
-                                  filename=BIN_FILES[i])
+            run_kilosort_with_drift_plots(settings=settings,
+                                          probe_name=CHANMAP_FILES[i],
+                                          results_dir=str(ks_out),
+                                          filename=BIN_FILES[i])
             print(f"Kilosort sorter {i+1} took {time.time() - start:.2f} s")
 
         print(f"Loading kilosort output sorter {i+1} from {ks_out}")

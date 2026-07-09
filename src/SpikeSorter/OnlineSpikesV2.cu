@@ -819,19 +819,32 @@ float OnlineSpikesV2::registerFingerprint(const std::vector<float>& F)
 		dc[t + n] = (float)s;
 	}
 
-	// x10 Gaussian upsampling to find a sub-bin peak
-	const int up = 10;
-	const int nUp = 2 * n * up + 1;
-	float best = -1e30f, bestBins = 0.0f;
-	for (int k = 0; k < nUp; ++k) {
-		float sf = -(float)n + (float)k * (2.0f * n) / (float)(nUp - 1);
-		double num = 0.0;
-		for (int t = -n; t <= n; ++t) {
-			float w = expf(-0.5f * (sf - (float)t) * (sf - (float)t));
-			num += (double)w * (double)dc[t + n];
+	// Sub-bin peak via parabolic interpolation around the integer argmax.
+	//
+	// The previous x10 Gaussian-weighted upsampling applied a kernel of sigma
+	// ~= 1 full bin over a +/-n-bin window (here n=2). That kernel is so wide
+	// relative to the search window that it just smooths the correlation curve
+	// toward its center, dragging every estimate toward zero -- a confirmed
+	// ~3x under-gain: a known rigid shift of +/-10 um was recovered as only
+	// +/-3 um. The integer-bin correlation `dc` itself recovers the shift
+	// exactly, so we keep it and interpolate the peak with a 3-point parabola,
+	// which restores ~unit gain on a rigid shift.
+	int iBest = 0;
+	float dcBest = dc[0];
+	for (int k = 1; k < 2 * n + 1; ++k)
+		if (dc[k] > dcBest) { dcBest = dc[k]; iBest = k; }
+
+	float offsetBins = 0.0f;
+	if (iBest > 0 && iBest < 2 * n) {
+		float ym1 = dc[iBest - 1], y0 = dc[iBest], yp1 = dc[iBest + 1];
+		float denom = ym1 - 2.0f * y0 + yp1; // < 0 at a genuine peak (concave down)
+		if (fabsf(denom) > 1e-12f) {
+			offsetBins = 0.5f * (ym1 - yp1) / denom;
+			if (offsetBins >  1.0f) offsetBins =  1.0f;
+			if (offsetBins < -1.0f) offsetBins = -1.0f;
 		}
-		if (num > best) { best = (float)num; bestBins = sf; }
 	}
+	float bestBins = (float)(iBest - n) + offsetBins;
 
 	float shiftUm = bestBins * m_binningDepth;
 	if (shiftUm >  m_driftMaxShiftUm) shiftUm =  m_driftMaxShiftUm;
@@ -903,8 +916,12 @@ void OnlineSpikesV2::estimateDrift(const std::vector<float>& depths,
 {
 	static const char *ptLabel = { "OnlineSpikesV2::estimateDrift" };
 	const long minSpikes = 300;
+	static long s_diagWindowIdx = 0; // TODO: can remove, diagnostic for drift investigation
 	if ((long)depths.size() < minSpikes) {
 		// Too few spikes to trust: keep the current matrix and estimate.
+		std::cout << "[Drift][diag] window " << s_diagWindowIdx++
+				  << " SKIPPED (nSpikes=" << depths.size()
+				  << " < minSpikes=" << minSpikes << ") endCt=" << windowEndCt << std::endl;
 		return;
 	}
 
@@ -913,10 +930,21 @@ void OnlineSpikesV2::estimateDrift(const std::vector<float>& depths,
 
 	float residualUm = registerFingerprint(F);
 
+	float totalBeforeUm = m_totalShiftUm; // TEMP DIAGNOSTIC
 	m_totalShiftUm += DRIFT_SIGN * residualUm;
 	float rel = m_totalShiftUm - m_dshiftLast;
-	if (rel >  m_driftMaxShiftUm) { rel =  m_driftMaxShiftUm; m_totalShiftUm = m_dshiftLast + rel; }
-	if (rel < -m_driftMaxShiftUm) { rel = -m_driftMaxShiftUm; m_totalShiftUm = m_dshiftLast + rel; }
+	bool clamped = false; // TEMP DIAGNOSTIC
+	if (rel >  m_driftMaxShiftUm) { rel =  m_driftMaxShiftUm; m_totalShiftUm = m_dshiftLast + rel; clamped = true; }
+	if (rel < -m_driftMaxShiftUm) { rel = -m_driftMaxShiftUm; m_totalShiftUm = m_dshiftLast + rel; clamped = true; }
+
+	// TEMP DIAGNOSTIC: raw per-window residual vs. accumulated total - remove after drift discrepancy investigation
+	std::cout << "[Drift][diag] window " << s_diagWindowIdx++
+	          << " nSpikes=" << depths.size()
+	          << " residualUm=" << residualUm
+	          << " totalShiftUm=" << totalBeforeUm << "->" << m_totalShiftUm
+	          << " rel=" << rel
+	          << (clamped ? " [CLAMPED]" : "")
+	          << " endCt=" << windowEndCt << std::endl;
 
 	// Build the new matrix into the inactive buffer, then publish via pointer swap.
 	float* active = m_activeDriftMatrix.load(std::memory_order_acquire);

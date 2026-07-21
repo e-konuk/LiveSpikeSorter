@@ -79,10 +79,9 @@ HINTS = {
     "CHANMAP": "The location of your probe's channel map (.mat file).",
     "SDM": "Send decoder output to stimulus display machine?",
     "MAX_TEMPLATES": ("Limit how many preclustered templates the sorter uses "
-                      "(0 = use all). Fewer templates = less GPU work in "
-                      "matchingPursuit = better real-time performance on low-spec "
-                      "GPUs, at some loss of detection. Applied to oss_input every "
-                      "launch."),
+                      "(0 = use all). Fewer templates = less GPU work for better "
+                      "performance on low-spec GPUs, at some loss of detection. "
+                      "Applied to oss_input every launch."),
     "CHANNEL_RANGE": ("Keep only templates with support on a probe channel range, "
                       "e.g. '100-150' (inclusive probe channel numbers; blank = all "
                       "channels). Use this to focus the sorter on one region of "

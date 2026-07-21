@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-subset_templates.py  --  Prototype template-subsetting tool
+subset_templates.py  --  template-subsetting tool
 -------
 Produces a reduced copy of a Kilosort-derived `oss_input/` directory that
 contains only the N most useful *preclustered* templates, so that lower-spec

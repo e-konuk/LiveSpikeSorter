@@ -305,7 +305,6 @@ void Gui::endFrame(ImVec4 &clear_color, ImGuiIO &io) {
 // Icon helpers
 // ---------------------------------------------------------------------------
 
-// =============================================================================
 // First-run default layout configuration
 // These values only apply when no imgui_lss.ini exists next to the exe.
 // Delete imgui_lss.ini to force a reset to these defaults.
@@ -341,7 +340,7 @@ static constexpr float ICON_VERTICAL_FRAC      = 0.99f;
 
 static void LoadIconTexture()
 {
-	// Path: <repo>\src\Gui\LSS_icon_JPEG_June8.jpg
+	// Path: <repo>\src\Gui\LSS_icon.jpg
 	wchar_t exePath[MAX_PATH];
 	GetModuleFileNameW(NULL, exePath, MAX_PATH);
 	std::wstring path(exePath);

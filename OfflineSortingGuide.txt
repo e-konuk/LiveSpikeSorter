@@ -68,8 +68,7 @@ SpikeGLX is an external dependency, downloaded separately
 
 A6. INSTALL PYTHON 3.10 + ENVIRONMENT SETUP
 --------------------------------------------------------------------------------
-Install Python 3.10 from python.org 
-
+Install Python 3.10 from python.org. Our dependencies do not currently support newer versions
   - At install time, leave "Add Python to PATH" checked.
 
 Then create a virtual environment:

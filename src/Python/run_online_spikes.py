@@ -199,6 +199,21 @@ def build_tab(frame, idx):
     ).grid(row=row, column=3)
     row += 1
 
+    # BASE_PATH
+    tk.Label(frame, text="BASE_PATH:").grid(
+        row=row, column=0, padx=5, pady=5, sticky="w"
+    )
+    tk.Entry(frame, textvariable=base_path_vars[idx], width=50).grid(
+        row=row, column=1
+    )
+    tk.Button(
+        frame, text="Browse", command=lambda i=idx: browse_directory(i)
+    ).grid(row=row, column=2)
+    tk.Button(
+        frame, text="?", command=lambda i=idx: show_hint("BASE"), width=3
+    ).grid(row=row, column=3)
+    row += 1
+
     # Template selection sub-frame (groups the two template-subsetting filters)
     template_frame = tk.Frame(frame, borderwidth=1, relief="sunken")
     template_frame.grid(row=row, column=0, columnspan=4, padx=5, pady=5, sticky="w")
@@ -230,20 +245,7 @@ def build_tab(frame, idx):
         template_frame, text="?", command=lambda i=idx: show_hint("CHANNEL_RANGE"), width=3
     ).grid(row=2, column=3)
 
-    # BASE_PATH
-    tk.Label(frame, text="BASE_PATH:").grid(
-        row=row, column=0, padx=5, pady=5, sticky="w"
-    )
-    tk.Entry(frame, textvariable=base_path_vars[idx], width=50).grid(
-        row=row, column=1
-    )
-    tk.Button(
-        frame, text="Browse", command=lambda i=idx: browse_directory(i)
-    ).grid(row=row, column=2)
-    tk.Button(
-        frame, text="?", command=lambda i=idx: show_hint("BASE"), width=3
-    ).grid(row=row, column=3)
-    row += 1
+    
 
     # SDM toggle
     tk.Checkbutton(

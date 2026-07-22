@@ -148,6 +148,7 @@ A GUI appears. For each sorter/probe, fill in:
                     feedback
  
 Check "Re-run Kilosort4" and let it run. Monitor progress in the terminal.
+(duration should be similar to length of training recording)
 
 When finished, the launcher automatically crops Kilosort's output into
 BASE_PATH/oss_input/ for LSS to load at startup.
@@ -208,18 +209,17 @@ B5. START SpikeGLX WITH A SIMULATED PROBE REPLAYING YOUR .ap.bin
 
 B6. LAUNCH LSS AND POINT IT AT THE SAME 127.0.0.1:4142
 --------------------------------------------------------------------------------
-With SpikeGLX still running (do not close it), continue to the LSS launcher:
-
-The LSS GUI will launch automatically after Kilosort (If needed, relaunch):
+Ensure your IP Address and Port are matching
+(If needed, relaunch):
   cd <repo>\src\Python
   py -3.10 run_online_spikes.py
 
-Click "Start Live Sorting"
+LSS GUI launches automatically after Kilosort completes
 
 
 B7. VERIFY OUTPUT
 --------------------------------------------------------------------------------
-Same as the online case. Each line of spikeOutput.txt is one spike:
+Each line of spikeOutput.txt is one spike:
 
   sample_time, template_id, amplitude, y_position
 

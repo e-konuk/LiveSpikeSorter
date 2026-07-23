@@ -36,6 +36,14 @@ LSS targets CUDA 11.3 specifically.
   - Verify the system environment variable CUDA_PATH points there with:
       echo %CUDA_PATH%
 
+      - Alternatively, search for "edit the system environment variables"
+        using windows search, open it, click "Environment Variables" under the
+	advanced tab and ensure CUDA_PATH is listed with the correct path under
+	System Variables
+	
+	Variable	Value
+	CUDA_PATH	C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.3
+
 
 A3. INSTALL cuDNN 8.x
 --------------------------------------------------------------------------------

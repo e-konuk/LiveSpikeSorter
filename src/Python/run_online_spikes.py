@@ -1,19 +1,18 @@
+# Only numpy + stdlib are needed to open this GUI and launch OnlineSpikes.exe
+# against an existing oss_input/ (requirements-runtime.txt). torch, kilosort,
+# qtpy, and matplotlib are only needed to (re)run Kilosort4 -- see
+# requirements-training.txt -- and are imported lazily, inside the functions
+# that actually use them, so launching doesn't require installing them.
 import sys
 import pathlib
 from pathlib import Path
 from crop_methods import crop_kilosort_output, parse_bin_meta_file
 from subset_templates import subset_oss_input_inplace, parse_channel_range
-import kilosort
 import numpy as np
-import torch
 import subprocess
 import time
 import os
 import shlex
-from kilosort.preprocessing import get_drift_matrix
-from kilosort.template_matching import prepare_extract
-import copy
-import matplotlib.pyplot as plt
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from tkinter import ttk
@@ -56,6 +55,31 @@ tk.Label(daq_frame, text="SGLX Port:").grid(row=2, column=0, padx=5, pady=5, sti
 tk.Entry(daq_frame, textvariable=sglx_port_var, width=15).grid(row=2, column=1, sticky="w")
 tk.Button(daq_frame, text="?", command=lambda: show_hint("SGLX_PORT"), width=3).grid(row=2, column=3)
 
+# Drift-correction parameters (shared across all sorters)
+drift_enabled_var = tk.BooleanVar(value=False)
+drift_window_var = tk.StringVar(value="60")
+drift_max_shift_var = tk.StringVar(value="50")
+
+drift_frame = tk.Frame(root, borderwidth=1, relief="groove")
+drift_frame.grid(row=1, column=4, columnspan=4, padx=5, pady=5, sticky="w")
+
+tk.Label(drift_frame, text="Drift Correction (shared)", font=("TkDefaultFont", 9, "bold")).grid(
+    row=0, column=0, columnspan=4, padx=5, pady=(5, 2), sticky="w"
+)
+
+tk.Checkbutton(drift_frame, text="Real-time drift estimation", variable=drift_enabled_var).grid(
+    row=1, column=0, columnspan=2, padx=5, pady=5, sticky="w"
+)
+tk.Button(drift_frame, text="?", command=lambda: show_hint("DRIFT_ENABLED"), width=3).grid(row=1, column=3)
+
+tk.Label(drift_frame, text="Window (s):").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+tk.Entry(drift_frame, textvariable=drift_window_var, width=10).grid(row=2, column=1, sticky="w")
+tk.Button(drift_frame, text="?", command=lambda: show_hint("DRIFT_WINDOW"), width=3).grid(row=2, column=3)
+
+tk.Label(drift_frame, text="Max shift (um):").grid(row=3, column=0, padx=5, pady=5, sticky="w")
+tk.Entry(drift_frame, textvariable=drift_max_shift_var, width=10).grid(row=3, column=1, sticky="w")
+tk.Button(drift_frame, text="?", command=lambda: show_hint("DRIFT_MAX_SHIFT"), width=3).grid(row=3, column=3)
+
 # Notebook for sorter tabs
 toolkit = ttk.Notebook(root)
 toolkit.grid(row=2, column=0, columnspan=4, padx=5, pady=5, sticky="nsew")
@@ -79,9 +103,10 @@ HINTS = {
     "CHANMAP": "The location of your probe's channel map (.mat file).",
     "SDM": "Send decoder output to stimulus display machine?",
     "MAX_TEMPLATES": ("Limit how many preclustered templates the sorter uses "
-                      "(0 = use all). Fewer templates = less GPU work for better "
-                      "performance on low-spec GPUs, at some loss of detection. "
-                      "Applied to oss_input every launch."),
+                      "(0 = use all). Fewer templates = less GPU work in "
+                      "matchingPursuit = better real-time performance on low-spec "
+                      "GPUs, at some loss of detection. Applied to oss_input every "
+                      "launch."),
     "CHANNEL_RANGE": ("Keep only templates with support on a probe channel range, "
                       "e.g. '100-150' (inclusive probe channel numbers; blank = all "
                       "channels). Use this to focus the sorter on one region of "
@@ -91,7 +116,20 @@ HINTS = {
     "SGLX_HOST": ("The IP address of the machine running SpikeGLX. If SpikeGLX is "
                   "running on this same machine, leave as 127.0.0.1. Shared by all "
                   "sorters (they use one SpikeGLX connection)."),
-    "SGLX_PORT": ("The port SpikeGLX is streaming on. Shared by all sorters.")
+    "SGLX_PORT": ("The port SpikeGLX is streaming on. Shared by all sorters."),
+    "DRIFT_ENABLED": ("Enable real-time rigid drift estimation + correction. The "
+                      "sorter accumulates the depth/amplitude of detected spikes "
+                      "over a sliding window, registers that activity fingerprint "
+                      "against the training recording to estimate a vertical shift "
+                      "(um), and rebuilds the drift-correction matrix live. A drift "
+                      "trace (time vs estimated depth) is shown in the output GUI. "
+                      "Shared by all sorters."),
+    "DRIFT_WINDOW": ("Length in seconds of the sliding window used to estimate "
+                     "drift. Longer = more spikes = more robust estimate but slower "
+                     "to react. Targets slow drift; ~60 s is a good starting point."),
+    "DRIFT_MAX_SHIFT": ("Maximum vertical drift (microns) the estimator will apply "
+                        "in either direction. Estimates are clamped to this range to "
+                        "reject spurious registration peaks.")
 }
 
 def show_hint(key):
@@ -245,8 +283,6 @@ def build_tab(frame, idx):
         template_frame, text="?", command=lambda i=idx: show_hint("CHANNEL_RANGE"), width=3
     ).grid(row=2, column=3)
 
-    
-
     # SDM toggle
     tk.Checkbutton(
         frame, text="SDM?", variable=sdm_vars[idx],
@@ -375,6 +411,9 @@ def main():
             num_sorters_var.set(state.get("num_sorters", num_sorters_var.get()))
             sglx_host_var.set(state.get("sglx_host", sglx_host_var.get()))
             sglx_port_var.set(state.get("sglx_port", sglx_port_var.get()))
+            drift_enabled_var.set(state.get("drift_enabled", drift_enabled_var.get()))
+            drift_window_var.set(state.get("drift_window_s", drift_window_var.get()))
+            drift_max_shift_var.set(state.get("drift_max_shift_um", drift_max_shift_var.get()))
         except Exception as e:
             print(f"Could not load GUI state: {e}")
 
@@ -430,12 +469,18 @@ def run_online_multi():
     CHANNEL_RANGES = [v.get().strip() for v in channel_range_vars]
     SGLX_HOST = sglx_host_var.get().strip()
     SGLX_PORT = sglx_port_var.get().strip()
+    DRIFT_ENABLED = drift_enabled_var.get()
+    DRIFT_WINDOW_S = drift_window_var.get().strip()
+    DRIFT_MAX_SHIFT_UM = drift_max_shift_var.get().strip()
 
     # Save current state
     state = {
         "num_sorters": n,
         "sglx_host": SGLX_HOST,
         "sglx_port": SGLX_PORT,
+        "drift_enabled": DRIFT_ENABLED,
+        "drift_window_s": DRIFT_WINDOW_S,
+        "drift_max_shift_um": DRIFT_MAX_SHIFT_UM,
         "base_paths": [str(p) for p in BASE_PATHS],
         "ks_output_dirs": [str(d) for d in KS_OUTPUT_DIRS],
         "bin_files": [str(p) for p in BIN_FILES],
@@ -500,7 +545,12 @@ def run_online_multi():
             arguments['--sdm_baseline_min_seconds'] = SDM_BASELINE_MIN_SECONDS[sdm_idx]
         if SDM_TRIGGER_BIN_MS[sdm_idx]:
             arguments['--sdm_trigger_bin_ms'] = SDM_TRIGGER_BIN_MS[sdm_idx]
-   
+
+    if DRIFT_ENABLED:
+        if DRIFT_WINDOW_S:
+            arguments['--drift_window_s'] = DRIFT_WINDOW_S
+        if DRIFT_MAX_SHIFT_UM:
+            arguments['--drift_max_shift_um'] = DRIFT_MAX_SHIFT_UM
 
     script_dir = pathlib.Path(__file__).parent.resolve()
     # Go back exactly two levels to reach the project root and build path to executable 
@@ -514,6 +564,8 @@ def run_online_multi():
         else:
             cmd.extend([k, str(v)])
     cmd.append('--no_input_gui')
+    if DRIFT_ENABLED:
+        cmd.append('--drift_estimation')
 
     print("Running LSS with:", shlex.join(cmd))
     proc = subprocess.Popen(cmd, shell=True)
@@ -575,12 +627,186 @@ def cluster_centroids_pca_compute(templates, Wall, pc_feature_ind):
     
     return centroids
 
+def build_drift_fingerprint(depths, amps, yc_min, yc_max, binning_depth, n_amp_bins=20):
+    """Build a depth x amplitude activity 'fingerprint' for drift registration.
+
+    Mirrors, byte-for-byte in convention, what the C++ sorter's drift estimator
+    builds live over each window (see OnlineSpikesV2 estimateDrift):
+      - depth bins of width `binning_depth`, starting at dmin = yc_min - 1,
+        with dmax = 1 + ceil((yc_max - dmin)/binning_depth) bins,
+      - `n_amp_bins` amplitude bins assigned by PERCENTILE RANK of the amplitude
+        (self-normalizing, so the online OMP amplitude scale need not match
+        Kilosort's detection-amplitude scale),
+      - cell value = log2(1 + count),
+      - mean-subtracted along the depth axis per amplitude column (matches
+        Kilosort align_block2's `Fg - Fg.mean(1)`).
+    """
+    depths = np.asarray(depths, dtype=np.float64)
+    amps   = np.asarray(amps,   dtype=np.float64)
+    dmin = yc_min - 1.0
+    dmax = int(1 + np.ceil((yc_max - dmin) / binning_depth))
+    F = np.zeros((dmax, n_amp_bins), dtype=np.float64)
+    if depths.size > 0:
+        rows = np.floor((depths - dmin) / binning_depth).astype(np.int64)
+        rows = np.clip(rows, 0, dmax - 1)
+        # amplitude -> percentile rank in [0, 1)
+        order = np.argsort(amps, kind='mergesort')
+        ranks = np.empty(amps.size, dtype=np.float64)
+        ranks[order] = np.arange(amps.size) / float(amps.size)
+        cols = np.floor(ranks * n_amp_bins).astype(np.int64)
+        cols = np.clip(cols, 0, n_amp_bins - 1)
+        np.add.at(F, (rows, cols), 1.0)
+    F = np.log2(1.0 + F)
+    F -= F.mean(axis=0, keepdims=True)   # mean-subtract along depth
+    return F
+
+
+def build_reference_fingerprint(depths, amps, times, batch_samples,
+                                yc_min, yc_max, binning_depth, n_amp_bins=20):
+    """Reference fingerprint = MEAN of per-batch fingerprints.
+
+    Matches Kilosort align_block2's `F0 = Fg.mean(0)` AND the live estimator's
+    per-window construction. The earlier version pooled EVERY spike into one
+    histogram and then took log2(1+count). Because log2 is nonlinear,
+    log2(1+sum) != mean(log2(1+count_per_batch)), so a pooled reference is a
+    different *kind* of object than the per-window fingerprints the live system
+    registers against, and high-firing periods dominate it. Binning spikes into
+    Kilosort-sized batches (batch_samples), building one percentile-rank
+    fingerprint per batch exactly as a live window does, then averaging with
+    equal weight per batch, removes that mismatch. This is the change that
+    fixes the live estimator's large start-of-run divergence from Kilosort.
+    """
+    depths = np.asarray(depths, dtype=np.float64)
+    amps   = np.asarray(amps,   dtype=np.float64)
+    times  = np.asarray(times,  dtype=np.float64)
+    dmin = yc_min - 1.0
+    dmax = int(1 + np.ceil((yc_max - dmin) / binning_depth))
+    if times.size == 0:
+        return np.zeros((dmax, n_amp_bins), dtype=np.float64)
+    batch_ids = np.floor(times / float(batch_samples)).astype(np.int64)
+    acc = np.zeros((dmax, n_amp_bins), dtype=np.float64)
+    n_batches = 0
+    for b in np.unique(batch_ids):
+        m = batch_ids == b
+        acc += build_drift_fingerprint(depths[m], amps[m], yc_min, yc_max,
+                                       binning_depth, n_amp_bins=n_amp_bins)
+        n_batches += 1
+    return acc / float(n_batches)
+
+
+def save_kilosort_drift_plots(dshift, st0, settings):
+    """Save drift_amount.png / drift_scatter.png into settings['results_dir']
+    using Kilosort4's own plotting code (kilosort.gui.sanity_plots), unmodified.
+
+    kilosort.run_kilosort() (the CLI entry point) never calls these -- they are
+    only ever triggered by the Kilosort4 GUI worker (kilosort.gui.run_box).
+    Since we feed them the same `dshift`/`st0` that a full offline GUI run
+    would compute (see run_kilosort_with_drift_plots), the resulting PNGs are
+    identical to what the GUI would have produced on the same recording.
+    """
+    if dshift is None or st0 is None:
+        print("Drift correction disabled (nblocks=0); skipping drift plots.")
+        return
+    from qtpy import QtWidgets
+    from kilosort.gui.sanity_plots import PlotWindow, plot_drift_amount, plot_drift_scatter
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+    drift_amount_window = PlotWindow(width=400, height=400, title='Drift Amount')
+    drift_scatter_window = PlotWindow(width=1500, height=700, title='Drift Scatter',
+                                      background='w')
+    plot_drift_amount(drift_amount_window, dshift, settings)
+    plot_drift_scatter(drift_scatter_window, st0, settings)
+    app.processEvents()
+
+
+def run_kilosort_with_drift_plots(settings, probe_name=None, results_dir=None,
+                                  filename=None, data_dtype=None, do_CAR=True,
+                                  invert_sign=False, device=None):
+    """Runs the same pipeline as kilosort.run_kilosort(), but captures the
+    drift-correction outputs (dshift, st0) in order to save the same
+    drift_amount.png / drift_scatter.png the Kilosort4 GUI shows mid-run.
+
+    kilosort.run_kilosort() has no hook for intermediate results, so this
+    mirrors its body step-for-step -- the same public functions, in the same
+    order, with the same RNG seeding it uses right before drift correction
+    (matching kilosort.gui.sorter.KiloSortWorker.run() too) -- so the drift
+    estimate here is identical to a full offline Kilosort4 GUI/CLI run on the
+    same recording, not just visually similar.
+    """
+    import torch
+    from kilosort.parameters import DEFAULT_SETTINGS
+    from kilosort.run_kilosort import (
+        set_files, setup_logger as ks_setup_logger, logger as ks_logger,
+        initialize_ops, compute_preprocessing, compute_drift_correction,
+        detect_spikes, cluster_spikes, save_sorting,
+    )
+
+    settings = {**DEFAULT_SETTINGS, **settings}
+    filename, data_dir, results_dir, probe = set_files(
+        settings, filename, None, probe_name, None, results_dir)
+    ks_setup_logger(results_dir)
+
+    if data_dtype is None:
+        data_dtype = 'int16'
+    if device is None:
+        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    if probe['chanMap'].max() >= settings['n_chan_bin']:
+        raise ValueError(
+            'Largest value of chanMap exceeds channel count of data, '
+            'make sure chanMap is 0-indexed.')
+
+    tic0 = time.time()
+    ops = initialize_ops(settings, probe, data_dtype, do_CAR, invert_sign,
+                         device, False)
+    ops = compute_preprocessing(ops, device, tic0=tic0)
+
+    np.random.seed(1)
+    torch.cuda.manual_seed_all(1)
+    torch.random.manual_seed(1)
+    ops, bfile, st0 = compute_drift_correction(ops, device, tic0=tic0)
+
+    ops['settings']['results_dir'] = str(results_dir)
+    save_kilosort_drift_plots(ops.get('dshift'), st0, ops['settings'])
+
+    st, tF, _, _ = detect_spikes(ops, results_dir, device, bfile, tic0=tic0)
+    clu, Wall = cluster_spikes(results_dir, st, tF, ops, device, bfile, ks_logger,
+                               tic0=tic0)
+    save_sorting(ops, results_dir, st, clu, tF, Wall, bfile.imin, tic0)
+
+
 def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
                          META_FILES, CHANMAP_FILES, RERUN_FLAGS,
                          MAX_TEMPLATES=None, CHANNEL_RANGES=None):
     OSS_DIRS = []
     for i, base in enumerate(BASE_PATHS):
         ks_out = KS_OUTPUT_DIRS[i]
+        oss_in = base / 'oss_input'
+
+        # Reuse an already-curated oss_input/ when not retraining, so repeat
+        # launches don't require torch/kilosort/qtpy/matplotlib installed at
+        # all. Max templates/Channel range only take effect when Rerun
+        # Kilosort4 is checked, or on the very first curate for this sorter.
+        if not RERUN_FLAGS[i] and (oss_in / 'templates.npy').exists():
+            print(f"Reusing existing oss_input for sorter {i+1} "
+                  "(Rerun Kilosort4 unchecked); skipping Kilosort4/torch-dependent steps.")
+            OSS_DIRS.append(str(oss_in) + '\\')
+            continue
+
+        try:
+            import torch
+            from kilosort.preprocessing import get_drift_matrix
+            from kilosort.template_matching import prepare_extract
+        except ImportError as e:
+            # Note: the Tk root is already destroyed by this point (finish_and_quit
+            # runs before run_online_multi reaches curate_oss_input_dir), so a
+            # messagebox popup isn't reliable here -- print + exit, matching the
+            # other post-GUI error paths in this function (below).
+            print("Error: curating oss_input/ requires the Kilosort4 training "
+                  "dependencies (torch, kilosort, ...).\n"
+                  "Install them with:\n"
+                  "    pip install -r requirements-training.txt\n"
+                  f"({e})")
+            sys.exit(1)
+
         if RERUN_FLAGS[i]:
             if not torch.cuda.is_available():
                 print(f"Error: No GPU for sorter {i+1}")
@@ -589,10 +815,10 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
             meta = parse_bin_meta_file(META_FILES[i])
             start = time.time()
             settings = {'data_dir': str(base / 'imec_raw'), 'n_chan_bin': meta['nSavedChans']}
-            kilosort.run_kilosort(settings=settings,
-                                  probe_name=CHANMAP_FILES[i],
-                                  results_dir=str(ks_out),
-                                  filename=BIN_FILES[i])
+            run_kilosort_with_drift_plots(settings=settings,
+                                          probe_name=CHANMAP_FILES[i],
+                                          results_dir=str(ks_out),
+                                          filename=BIN_FILES[i])
             print(f"Kilosort sorter {i+1} took {time.time() - start:.2f} s")
 
         print(f"Loading kilosort output sorter {i+1} from {ks_out}")
@@ -635,7 +861,6 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
         pre_wf = torch.einsum('ijk,jl->kil', torch.tensor(Wall3), torch.tensor(wPCA)).permute(1,2,0).contiguous().numpy()
         print(f"Detected {channel_map.shape[0]} channels, {templates.shape[0]} templates")
 
-        oss_in = base / 'oss_input'
         oss_in.mkdir(parents=True, exist_ok=True)
         # crop core tensors
         crop_kilosort_output(templates, whitening_mat, channel_map,
@@ -665,11 +890,29 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
         np.save(oss_in / 'yc.npy', yc)
         np.save(oss_in / 'preclustered_template_waveforms.npy', pre_wf)
         np.save(oss_in / 'cluster_centroids_pca.npy', cluster_centroids_pca)
+        # --- Real-time drift estimation exports ---
+        iKxx = np.ascontiguousarray(np.array(ops['iKxx'], dtype=np.float32))
+        np.save(oss_in / 'iKxx.npy', iKxx)
+
+        binning_depth = float(ops['settings']['binning_depth'])
+        sig_interp    = float(ops['settings']['sig_interp'])
+        yc_min = float(np.min(yc)); yc_max = float(np.max(yc))
+        batch_samples = float(ops['settings']['batch_size'])
+        ref_fp = build_reference_fingerprint(spike_positions[:, 1], amplitudes,
+                                             spike_times, batch_samples,
+                                             yc_min, yc_max, binning_depth)
+        np.save(oss_in / 'reference_fingerprint.npy', ref_fp.astype(np.float32))
+
         with open(oss_in / 'misc.txt', 'w') as f:
             f.write(f"nt0min:{ops['nt0min']}\n")
             f.write(f"numNearestChans:{ops['settings']['nearest_chans']}\n")
             f.write(f"Th_learned:{ops['Th_learned']}\n")
             f.write(f"duplicate_spike_bins:{ops['duplicate_spike_bins']}\n")
+            f.write(f"sig_interp:{sig_interp}\n")
+            f.write(f"binning_depth:{binning_depth}\n")
+            f.write(f"yc_min:{yc_min}\n")
+            f.write(f"yc_max:{yc_max}\n")
+            f.write(f"dshift_last:{float(dshift[-1])}\n")
 
         # Optionally subset preclustered templates for lower-spec GPUs and/or
         # to focus on a probe channel range. The two filters compose: the

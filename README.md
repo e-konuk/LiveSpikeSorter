@@ -5,11 +5,11 @@ Live Spike Sorter (LSS) is a GPU-accelerated real-time spike sorter for extracel
 ## Prerequisites
 
 | Requirement | Version / Notes |
-|---|---|
+| :---- | :---- |
 | **NVIDIA GPU** | Compute capability 7.5 or higher |
-| **CUDA** | 11.3 |
-| **cuDNN** | Compatible with CUDA 11.3 ([install guide](https://docs.nvidia.com/deeplearning/cudnn/install-guide/index.html)) |
-| **Visual Studio** | 2017 with the **v141** platform toolset |
+| **CUDA** | 11.8 |
+| **cuDNN** | Compatible with CUDA 11.8 ([install guide](https://docs.nvidia.com/deeplearning/cudnn/install-guide/index.html)) |
+| **Visual Studio** | 2022 Build Tools with the **v143** platform toolset |
 | **Windows 10 SDK** | 10.0.17763.0 |
 | **Python** | 3.10 |
 | **SpikeGLX** | Latest release |
@@ -17,30 +17,33 @@ Live Spike Sorter (LSS) is a GPU-accelerated real-time spike sorter for extracel
 
 ## Building from Source
 
-1. Open `OnlineSpikes.vcxproj` in Visual Studio 2017.
-2. Set the `CUDA_PATH` environment variable to your CUDA 11.3 installation (e.g. `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.3`).
-3. Select **Release | x64** and build the solution.
+1. Open `OnlineSpikes.vcxproj` in Visual Studio 2022 (Build Tools, `v143` toolset).  
+2. Set the `CUDA_PATH` environment variable to your CUDA 11.8 installation (e.g. `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8`).  
+3. Select **Release | x64** and build the solution.  
 4. If successful, you should see output in `<repo>\x64\RELEASE\OnlineSpikes.exe`
 
 ### Common Build Errors
 
-- **Cannot find CUDA `.props` file** — See [this NVIDIA forum post](https://forums.developer.nvidia.com/t/cannot-run-samples-on-ms-visual-studi-2019/72472) for the fix.
+- **Cannot find CUDA `.props` file** — See [this NVIDIA forum post](https://forums.developer.nvidia.com/t/cannot-run-samples-on-ms-visual-studi-2019/72472) for the fix.  
 - **Cannot find `rc.exe`** — Copy `rc.exe` and its corresponding `.dll` from your Windows SDK bin directory into the appropriate Microsoft Kits bin folder, or switch to the 8.1 SDK.
 
 ## Python Environment Setup
 
 Create a virtual environment with Python 3.10 and install the required packages:
 
-```bash
-python -m venv venv
-venv\Scripts\activate
+python \-m venv venv
+
+venv\\Scripts\\activate
 
 pip install kilosort==4.0.13
-pip install torch==1.12.0+cu113 -f https://download.pytorch.org/whl/torch_stable.html
-pip install "numpy<2" scipy scikit-learn matplotlib h5py
+
+pip install torch==1.12.0+cu113 \-f https://download.pytorch.org/whl/torch\_stable.html
+
+pip install "numpy\<2" scipy scikit-learn matplotlib h5py
+
 pip install spikeinterface probeinterface
+
 pip install h5py pyqtgraph PyQt5
-```
 
 ## Running Kilosort4 (Template Learning)
 
@@ -50,20 +53,16 @@ Before running LSS, you must run Kilosort4 on a short recording (10–20 minutes
 
 ### Option 1: Python Launcher GUI
 
-```bash
-python src/Python/run_online_spikes.py
-```
+python src/Python/run\_online\_spikes.py
 
 The GUI lets you configure one or more sorter instances, select Kilosort output directories, and optionally re-run Kilosort4 before launching LSS.
 
 ### Option 2: Direct CLI
 
-```bash
-x64\RELEASE\OnlineSpikes.exe [options]
-```
+x64\\RELEASE\\OnlineSpikes.exe \[options\]
 
 | Argument | Description |
-|---|---|
+| :---- | :---- |
 | `--n_gpus <N>` | Number of GPUs / parallel sorter instances |
 | `--oss_input <path> [path ...]` | Input directory per GPU (Kilosort output, one per GPU) |
 | `--decoder_input <path> [path ...]` | Decoder input directory per GPU |
@@ -81,8 +80,8 @@ x64\RELEASE\OnlineSpikes.exe [options]
 
 LSS includes an optional real-time decoder that trains a classifier on spike data collected during an initial recording session. To use it:
 
-1. Run LSS without the decoder enabled for 10–20 minutes to produce a `spikeOutput.txt` file.
-2. Re-launch LSS with decoding enabled, pointing the decoder at the collected spike data and an event file for training labels.
+1. Run LSS without the decoder enabled for 10–20 minutes to produce a `spikeOutput.txt` file.  
+2. Re-launch LSS with decoding enabled, pointing the decoder at the collected spike data and an event file for training labels.  
 3. The decoder will train online and begin producing predictions in real time.
 
-The SDM (Stimulus Display Machine) integration allows LSS to send decoded output over TCP to a separate machine for closed-loop stimulus control.
+The SDM (Stimulus Display Machine) integration allows LSS to send decoded output over TCP to a separate machine for closed-loop stimulus control.  

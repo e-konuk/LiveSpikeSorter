@@ -56,8 +56,8 @@ tk.Entry(daq_frame, textvariable=sglx_port_var, width=15).grid(row=2, column=1, 
 tk.Button(daq_frame, text="?", command=lambda: show_hint("SGLX_PORT"), width=3).grid(row=2, column=3)
 
 # Drift-correction parameters (shared across all sorters)
-drift_enabled_var = tk.BooleanVar(value=False)
-drift_window_var = tk.StringVar(value="60")
+drift_enabled_var = tk.BooleanVar(value=True)
+drift_window_var = tk.StringVar(value="10")
 drift_max_shift_var = tk.StringVar(value="50")
 
 drift_frame = tk.Frame(root, borderwidth=1, relief="groove")
@@ -117,19 +117,24 @@ HINTS = {
                   "running on this same machine, leave as 127.0.0.1. Shared by all "
                   "sorters (they use one SpikeGLX connection)."),
     "SGLX_PORT": ("The port SpikeGLX is streaming on. Shared by all sorters."),
-    "DRIFT_ENABLED": ("Enable real-time rigid drift estimation + correction. The "
-                      "sorter accumulates the depth/amplitude of detected spikes "
-                      "over a sliding window, registers that activity fingerprint "
-                      "against the training recording to estimate a vertical shift "
-                      "(um), and rebuilds the drift-correction matrix live. A drift "
-                      "trace (time vs estimated depth) is shown in the output GUI. "
-                      "Shared by all sorters."),
-    "DRIFT_WINDOW": ("Length in seconds of the sliding window used to estimate "
-                     "drift. Longer = more spikes = more robust estimate but slower "
-                     "to react. Targets slow drift; ~60 s is a good starting point."),
-    "DRIFT_MAX_SHIFT": ("Maximum vertical drift (microns) the estimator will apply "
-                        "in either direction. Estimates are clamped to this range to "
-                        "reject spurious registration peaks.")
+    "DRIFT_ENABLED": ("Enable real-time rigid drift estimation + correction. Each "
+                      "batch is scanned with Kilosort's universal templates (on "
+                      "whitened, NOT yet drift-corrected data), the depth and "
+                      "amplitude of those detections are binned into an activity "
+                      "fingerprint over a window, and that fingerprint is registered "
+                      "against the training reference to give a vertical shift (um). "
+                      "The drift-correction matrix is then rebuilt live. A drift "
+                      "trace is shown in the output GUI. Shared by all sorters. "
+                      "Requires the universal-template exports in oss_input/ -- "
+                      "re-run Kilosort4 once if they are missing."),
+    "DRIFT_WINDOW": ("Length in seconds of the window used to estimate drift. "
+                     "Longer = more spikes = more robust estimate but slower to "
+                     "react. Targets slow drift; 10 s is a good starting point and "
+                     "matches the diagnostic's default."),
+    "DRIFT_MAX_SHIFT": ("Safety clamp (microns) on the estimated shift. This is a "
+                        "rail, not a tuning knob: if it engages, the estimate was "
+                        "not trustworthy in the first place. The output GUI reports "
+                        "how often it fires."),
 }
 
 def show_hint(key):
@@ -627,82 +632,12 @@ def cluster_centroids_pca_compute(templates, Wall, pc_feature_ind):
     
     return centroids
 
-def build_drift_fingerprint(depths, amps, yc_min, yc_max, binning_depth, n_amp_bins=20):
-    """Build a depth x amplitude activity 'fingerprint' for drift registration.
-
-    Mirrors, byte-for-byte in convention, what the C++ sorter's drift estimator
-    builds live over each window (see OnlineSpikesV2 estimateDrift):
-      - depth bins of width `binning_depth`, starting at dmin = yc_min - 1,
-        with dmax = 1 + ceil((yc_max - dmin)/binning_depth) bins,
-      - `n_amp_bins` amplitude bins assigned by PERCENTILE RANK of the amplitude
-        (self-normalizing, so the online OMP amplitude scale need not match
-        Kilosort's detection-amplitude scale),
-      - cell value = log2(1 + count),
-      - mean-subtracted along the depth axis per amplitude column (matches
-        Kilosort align_block2's `Fg - Fg.mean(1)`).
-    """
-    depths = np.asarray(depths, dtype=np.float64)
-    amps   = np.asarray(amps,   dtype=np.float64)
-    dmin = yc_min - 1.0
-    dmax = int(1 + np.ceil((yc_max - dmin) / binning_depth))
-    F = np.zeros((dmax, n_amp_bins), dtype=np.float64)
-    if depths.size > 0:
-        rows = np.floor((depths - dmin) / binning_depth).astype(np.int64)
-        rows = np.clip(rows, 0, dmax - 1)
-        # amplitude -> percentile rank in [0, 1)
-        order = np.argsort(amps, kind='mergesort')
-        ranks = np.empty(amps.size, dtype=np.float64)
-        ranks[order] = np.arange(amps.size) / float(amps.size)
-        cols = np.floor(ranks * n_amp_bins).astype(np.int64)
-        cols = np.clip(cols, 0, n_amp_bins - 1)
-        np.add.at(F, (rows, cols), 1.0)
-    F = np.log2(1.0 + F)
-    F -= F.mean(axis=0, keepdims=True)   # mean-subtract along depth
-    return F
-
-
-def build_reference_fingerprint(depths, amps, times, batch_samples,
-                                yc_min, yc_max, binning_depth, n_amp_bins=20):
-    """Reference fingerprint = MEAN of per-batch fingerprints.
-
-    Matches Kilosort align_block2's `F0 = Fg.mean(0)` AND the live estimator's
-    per-window construction. The earlier version pooled EVERY spike into one
-    histogram and then took log2(1+count). Because log2 is nonlinear,
-    log2(1+sum) != mean(log2(1+count_per_batch)), so a pooled reference is a
-    different *kind* of object than the per-window fingerprints the live system
-    registers against, and high-firing periods dominate it. Binning spikes into
-    Kilosort-sized batches (batch_samples), building one percentile-rank
-    fingerprint per batch exactly as a live window does, then averaging with
-    equal weight per batch, removes that mismatch. This is the change that
-    fixes the live estimator's large start-of-run divergence from Kilosort.
-    """
-    depths = np.asarray(depths, dtype=np.float64)
-    amps   = np.asarray(amps,   dtype=np.float64)
-    times  = np.asarray(times,  dtype=np.float64)
-    dmin = yc_min - 1.0
-    dmax = int(1 + np.ceil((yc_max - dmin) / binning_depth))
-    if times.size == 0:
-        return np.zeros((dmax, n_amp_bins), dtype=np.float64)
-    batch_ids = np.floor(times / float(batch_samples)).astype(np.int64)
-    acc = np.zeros((dmax, n_amp_bins), dtype=np.float64)
-    n_batches = 0
-    for b in np.unique(batch_ids):
-        m = batch_ids == b
-        acc += build_drift_fingerprint(depths[m], amps[m], yc_min, yc_max,
-                                       binning_depth, n_amp_bins=n_amp_bins)
-        n_batches += 1
-    return acc / float(n_batches)
-
-
 def save_kilosort_drift_plots(dshift, st0, settings):
-    """Save drift_amount.png / drift_scatter.png into settings['results_dir']
-    using Kilosort4's own plotting code (kilosort.gui.sanity_plots), unmodified.
+    """
+    Saves drift_amount.png into our results directory (using Kilosort4's own plotting code).
+    Used for targetting training only atm
 
-    kilosort.run_kilosort() (the CLI entry point) never calls these -- they are
-    only ever triggered by the Kilosort4 GUI worker (kilosort.gui.run_box).
-    Since we feed them the same `dshift`/`st0` that a full offline GUI run
-    would compute (see run_kilosort_with_drift_plots), the resulting PNGs are
-    identical to what the GUI would have produced on the same recording.
+    Resulting PNGs should be identical to what Kilosort would have produced
     """
     if dshift is None or st0 is None:
         print("Drift correction disabled (nblocks=0); skipping drift plots.")
@@ -721,16 +656,8 @@ def save_kilosort_drift_plots(dshift, st0, settings):
 def run_kilosort_with_drift_plots(settings, probe_name=None, results_dir=None,
                                   filename=None, data_dtype=None, do_CAR=True,
                                   invert_sign=False, device=None):
-    """Runs the same pipeline as kilosort.run_kilosort(), but captures the
-    drift-correction outputs (dshift, st0) in order to save the same
-    drift_amount.png / drift_scatter.png the Kilosort4 GUI shows mid-run.
-
-    kilosort.run_kilosort() has no hook for intermediate results, so this
-    mirrors its body step-for-step -- the same public functions, in the same
-    order, with the same RNG seeding it uses right before drift correction
-    (matching kilosort.gui.sorter.KiloSortWorker.run() too) -- so the drift
-    estimate here is identical to a full offline Kilosort4 GUI/CLI run on the
-    same recording, not just visually similar.
+    """
+    Runs kilosort.run_kilosort() with the drift-correction outputs
     """
     import torch
     from kilosort.parameters import DEFAULT_SETTINGS
@@ -764,6 +691,9 @@ def run_kilosort_with_drift_plots(settings, probe_name=None, results_dir=None,
     torch.random.manual_seed(1)
     ops, bfile, st0 = compute_drift_correction(ops, device, tic0=tic0)
 
+    # Snapshot the drift-stage detector before detect_spikes clobbers it.
+    drift_snapshot = snapshot_drift_stage(ops, st0)
+
     ops['settings']['results_dir'] = str(results_dir)
     save_kilosort_drift_plots(ops.get('dshift'), st0, ops['settings'])
 
@@ -771,6 +701,61 @@ def run_kilosort_with_drift_plots(settings, probe_name=None, results_dir=None,
     clu, Wall = cluster_spikes(results_dir, st, tF, ops, device, bfile, ks_logger,
                                tic0=tic0)
     save_sorting(ops, results_dir, st, clu, tF, Wall, bfile.imin, tic0)
+
+    return drift_snapshot
+
+
+def _to_numpy(x, dtype=None):
+    """torch tensor / list / array -> contiguous numpy array."""
+    if hasattr(x, 'detach'):
+        x = x.detach().cpu().numpy()
+    x = np.ascontiguousarray(np.asarray(x))
+    return x.astype(dtype) if dtype is not None else x
+
+
+def snapshot_drift_stage(ops, st0, device=None):
+    """
+    Copy everything the live estimator needs
+    """
+    import torch
+    from kilosort.datashift import bin_spikes, align_block2
+
+    if device is None:
+        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
+    F, ysamp = bin_spikes(ops, st0)
+    _, _, F0, _ = align_block2(F, ysamp, ops, device=device)
+
+    # dshift is (Nbatches, 2*nblocks-1). We estimate rigidly, so collapse the
+    # blocks to one trace; with the default nblocks=1 this is a no-op.
+    dshift = np.asarray(ops['dshift']).mean(axis=1)
+    yc = _to_numpy(ops['yc'], np.float32)
+
+    return {
+        # universal-template detector (drift stage)
+        'ud_wTEMP': _to_numpy(ops['wTEMP'], np.float32),
+        'ud_iC': _to_numpy(ops['iC'], np.int32),
+        'ud_iC2': _to_numpy(ops['iC2'], np.int32),
+        'ud_weigh': _to_numpy(ops['weigh'], np.float32),
+        'ud_ycup': _to_numpy(ops['ycup'], np.float32),
+        'ud_xcup': _to_numpy(ops['xcup'], np.float32),
+        # reference fingerprint + Kilosort's own training drift trace
+        'ks_F0': np.ascontiguousarray(_to_numpy(F0, np.float32)),
+        'ks_dshift': np.ascontiguousarray(dshift.astype(np.float32)),
+        # scalars for misc.txt
+        'scalars': {
+            'Th_universal': float(ops['settings']['Th_universal']),
+            'n_templates': int(ops['settings']['n_templates']),
+            'template_sizes': int(ops['settings']['template_sizes']),
+            'nearest_templates': int(ops['settings']['nearest_templates']),
+            'nt': int(ops['nt']),
+            'n_filters': int(_to_numpy(ops['iC']).shape[1]),
+            'batch_size': int(ops['batch_size']),
+            'n_amp_bins': 20,
+            # yc_min/yc_max are written by the main misc.txt block; do not
+            # duplicate them here (the C++ parser is a map -- last line wins).
+        },
+    }
 
 
 def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
@@ -815,11 +800,17 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
             meta = parse_bin_meta_file(META_FILES[i])
             start = time.time()
             settings = {'data_dir': str(base / 'imec_raw'), 'n_chan_bin': meta['nSavedChans']}
-            run_kilosort_with_drift_plots(settings=settings,
-                                          probe_name=CHANMAP_FILES[i],
-                                          results_dir=str(ks_out),
-                                          filename=BIN_FILES[i])
+            drift_snapshot = run_kilosort_with_drift_plots(
+                settings=settings,
+                probe_name=CHANMAP_FILES[i],
+                results_dir=str(ks_out),
+                filename=BIN_FILES[i])
             print(f"Kilosort sorter {i+1} took {time.time() - start:.2f} s")
+        else:
+            # The universal-template detector can only be captured while
+            # Kilosort is running (see snapshot_drift_stage). Without it the
+            # live drift estimator has nothing to detect with.
+            drift_snapshot = None
 
         print(f"Loading kilosort output sorter {i+1} from {ks_out}")
         # load all files
@@ -897,11 +888,21 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
         binning_depth = float(ops['settings']['binning_depth'])
         sig_interp    = float(ops['settings']['sig_interp'])
         yc_min = float(np.min(yc)); yc_max = float(np.max(yc))
-        batch_samples = float(ops['settings']['batch_size'])
-        ref_fp = build_reference_fingerprint(spike_positions[:, 1], amplitudes,
-                                             spike_times, batch_samples,
-                                             yc_min, yc_max, binning_depth)
-        np.save(oss_in / 'reference_fingerprint.npy', ref_fp.astype(np.float32))
+
+        # --- Universal-template detector for the LIVE drift estimator ---
+        # These come from the snapshot taken mid-Kilosort, not from ops.npy /
+        # ops.npz -- see snapshot_drift_stage() for why those are the wrong
+        # detector. Without them the C++ estimator refuses to enable itself.
+        if drift_snapshot is not None:
+            for key in ('ud_wTEMP', 'ud_iC', 'ud_iC2', 'ud_weigh',
+                        'ud_ycup', 'ud_xcup', 'ks_F0', 'ks_dshift'):
+                np.save(oss_in / f'{key}.npy', drift_snapshot[key])
+            print(f"  drift detector: {drift_snapshot['scalars']['n_filters']} "
+                  f"template positions, ks_F0 {drift_snapshot['ks_F0'].shape}")
+        else:
+            print("  NOTE: universal-template drift exports not written "
+                  "(Kilosort4 was not re-run this launch). Live drift "
+                  "estimation will stay off until you re-run Kilosort4 once.")
 
         with open(oss_in / 'misc.txt', 'w') as f:
             f.write(f"nt0min:{ops['nt0min']}\n")
@@ -913,6 +914,9 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
             f.write(f"yc_min:{yc_min}\n")
             f.write(f"yc_max:{yc_max}\n")
             f.write(f"dshift_last:{float(dshift[-1])}\n")
+            if drift_snapshot is not None:
+                for k, v in drift_snapshot['scalars'].items():
+                    f.write(f"{k}:{v}\n")
 
         # Optionally subset preclustered templates for lower-spec GPUs and/or
         # to focus on a probe channel range. The two filters compose: the

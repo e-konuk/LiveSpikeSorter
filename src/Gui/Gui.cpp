@@ -501,6 +501,7 @@ static void BuildDockLayout(ImGuiID dockspace_id)
 	ImGui::DockBuilderDockWindow("LSS Icon",                     icon_node);
 	ImGui::DockBuilderDockWindow("Neurons",                      neurons_node);
 	ImGui::DockBuilderDockWindow("Processing time distribution", top_right);
+	ImGui::DockBuilderDockWindow("Drift trace",                  top_right);
 	ImGui::DockBuilderFinish(dockspace_id);
 
 	g_rasterDockNode = top_left;

@@ -16,18 +16,23 @@ void WhitenOnGPU(cublasHandle_t& Handle, float *fW, float *fYW, float *fY, long 
 void matMul(cublasHandle_t& handle, const float* d_A, const float* d_B, float* d_C, int M, int K, int N);
 long RemoveDCGPU(cublasHandle_t& Handle, float *fY, float *fDC, long lW, long lC, long lCt, float *OnesArray, float *Means);
 void transpose(float* d_A, float* d_At, int numRows, int numCols);
+// Build the rigid drift-correction matrix for a single global vertical shift (microns)
+void ComputeDriftMat(cublasHandle_t& handle, cudaStream_t stream,
+                     const float* d_xc, const float* d_yc, const float* d_iKxx,
+                     float* d_Kyx, float sigInterp, float shiftUm, int C,
+                     float* d_result, bool transposeResult);
 void highpass(cufftHandle planForward, cufftHandle planInverse, float* d_batch, float* d_highpassed, const std::complex<float>* fwav, cufftComplex* d_hpworkspace, long C, long W);
 void meanRemove(float* d_batch, float* d_workspace, long W, long C);
 void updateResidual(
 	const thrust::device_vector<long>& d_spikeIndices,  // spike indices vector
 	float* d_amps,               // amplitudes array on device
 	float* d_templateWaveforms,  // template waveforms on device
-	int M,                     // number of samples in a template
-	int C,                     // number of channels
-	int currBatchNumSamples,   // number of samples in current batch
-	float* d_ctc,              // ctc matrix on device
-	int unclu_T,               // dimension for convolution output
-	float* d_residual,         // residual array on device
+	int M,                       // number of samples in a template
+	int C,                       // number of channels
+	int currBatchNumSamples,     // number of samples in current batch
+	float* d_ctc,                // ctc matrix on device
+	int unclu_T,                 // dimension for convolution output
+	float* d_residual,           // residual array on device
 	float* d_convResult
 );
 

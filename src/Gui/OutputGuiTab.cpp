@@ -1,11 +1,15 @@
 #include <numeric>
 #include <cstdio>
 #include <algorithm>
+#include <fstream>
+#include <string>
+#include <cmath>
 
 #include <ImGUI/implot.h>
 #include <ImGUI/implot_internal.h>
 extern ImGuiID g_spikeStatsDockNode;
 extern ImGuiID g_rasterDockNode;
+#include "CNPY/cnpy.h"          // ks_dshift.npy, for the drift-trace overlay
 #include "../Helpers/GuiHelpers.h"
 #include "../Networking/sorterParameters.h"
 #include "../Networking/onlineSpikesPayload.h"
@@ -22,7 +26,7 @@ static std::string formatFixed2(double val) {
 	return std::string(buf);
 }
 
-OutputGuiTab::OutputGuiTab(std::string tabName) :
+OutputGuiTab::OutputGuiTab(std::string tabName, std::string ossInputDir) :
 	m_lT(0),
 	m_lC(0),
 	m_lM(0),
@@ -36,7 +40,8 @@ OutputGuiTab::OutputGuiTab(std::string tabName) :
 	m_bNeurons(),
 	plotWindowClass(ImGuiWindowClass()),
 	fm(&sock),
-	tabName(tabName)
+	tabName(tabName),
+	m_sOssInputDir(ossInputDir)
 {
 	plotWindowClass.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoDockingOverMe;
 	std::thread fmThread = fm.assemblerThread();
@@ -163,12 +168,15 @@ void OutputGuiTab::UpdateEvents() {
 			m_vfP2P.push_back(payload.P2P);
 		}
 
-		// Drift trace: one point per estimation window
-		if (payload.driftUpdateCt > 0 && payload.driftUpdateCt != m_lastDriftUpdateCt) {
+		// Drift trace: one point per estimation window.
+		{
 			std::lock_guard<std::mutex> lk(driftMutex);
-			m_lastDriftUpdateCt = payload.driftUpdateCt;
-			m_vfDriftDepth.push_back(payload.driftShiftUm);
-			m_vfDriftTimeSec.push_back((float)(payload.driftUpdateCt / (double)m_fSampRate));
+			if (payload.driftUpdateCt > 0 &&
+			    payload.driftUpdateCt != m_lastDriftUpdateCt) {
+				m_lastDriftUpdateCt = payload.driftUpdateCt;
+				m_vfDriftDepth.push_back(payload.driftShiftUm);
+				m_vfDriftTimeSec.push_back((float)(payload.driftUpdateCt / (double)m_fSampRate));
+			}
 		}
 
 		processingTimeMutex.lock();
@@ -279,6 +287,20 @@ static void RasterTimeAxisFormatter(double value, char* buff, int size, void* /*
 		snprintf(buff, size, "%ld:%02ld:%02ld", h, m, s);
 	else
 		snprintf(buff, size, "%ld:%02ld", m, s);
+}
+
+
+// Same h:mm:ss as the raster
+static void DriftTimeAxisFormatter(double value, char* buff, int size, void* /*user_data*/) {
+	const char* sign = (value < 0.0) ? "-" : "";
+	long totalSec = (long)(fabs(value) + 0.5);
+	long h = totalSec / 3600;
+	long m = (totalSec % 3600) / 60;
+	long s = totalSec % 60;
+	if (h > 0)
+		snprintf(buff, size, "%s%ld:%02ld:%02ld", sign, h, m, s);
+	else
+		snprintf(buff, size, "%s%ld:%02ld", sign, m, s);
 }
 
 
@@ -514,18 +536,83 @@ void OutputGuiTab::plotDriftTrace(const ImVec2 windowCenter, bool &showDrift) {
 		return;
 	}
 
-	ImGui::Text("Latest estimated drift: %.2f um", ys.back());
+	float lo = ys[0], hi = ys[0];
+	for (size_t i = 1; i < ys.size(); ++i) {
+		if (ys[i] < lo) lo = ys[i];
+		if (ys[i] > hi) hi = ys[i];
+	}
 
-	if (ImPlot::BeginPlot("Estimated drift vs. time", ImVec2(-1, -1))) {
-		ImPlot::SetupAxes("Time (hh:mm:ss)", "estimated depth (um)"); 
-		
-		ImPlot::SetupAxisFormat(ImAxis_X1, RasterTimeAxisFormatter); // Adjusted to show in hh:mm:ss format
-		ImPlot::SetupAxisLimits(ImAxis_X1, xs.front(), xs.back(), ImPlotCond_Always);
-		
-		ImPlot::PlotLine("drift", xs.data(), ys.data(), (int)xs.size());
+	if (!m_bDriftRefLoaded) loadDriftReference();
+
+	
+	ImGui::Checkbox("Follow live", &m_bDriftFollow);
+
+	if (ImPlot::BeginPlot("Estimated drift over time", ImVec2(-1, -1))) {
+		ImPlot::SetupAxes("Time from start of recording (h:mm:ss)",
+		                  "Estimated drift (um)");
+
+		ImPlot::SetupAxisFormat(ImAxis_X1, DriftTimeAxisFormatter); // signed
+		const double x0 = m_vfKsDriftTimeSec.empty()
+		                  ? xs.front()
+		                  : (double)m_vfKsDriftTimeSec.front();
+		ImPlot::SetupAxisLimits(ImAxis_X1, x0, xs.back(),
+		                        m_bDriftFollow ? ImPlotCond_Always
+		                                       : ImPlotCond_Once);
+
+		if (!m_vfKsDriftTimeSec.empty()) {
+			ImPlot::PlotLine("kilosort (train)", m_vfKsDriftTimeSec.data(),
+			                 m_vfKsDrift.data(), (int)m_vfKsDrift.size());
+			float klo = lo, khi = hi;
+			for (size_t i = 0; i < m_vfKsDrift.size(); ++i) {
+				if (m_vfKsDrift[i] < klo) klo = m_vfKsDrift[i];
+				if (m_vfKsDrift[i] > khi) khi = m_vfKsDrift[i];
+			}
+			double bx[2] = { 0.0, 0.0 };
+			double by[2] = { (double)klo - 10.0, (double)khi + 10.0 };
+		}
+		ImPlot::PlotLine("live", xs.data(), ys.data(), (int)xs.size());
 		ImPlot::EndPlot();
 	}
 	ImGui::End();
+}
+
+void OutputGuiTab::loadDriftReference() {
+	m_bDriftRefLoaded = true;   // one attempt only, success or not
+	if (m_sOssInputDir.empty()) return;
+
+	float batchSamples = 60000.0f;
+	try {
+		std::ifstream misc(m_sOssInputDir + "misc.txt");
+		std::string line;
+		while (std::getline(misc, line)) {
+			const size_t sep = line.find(':');
+			if (sep == std::string::npos) continue;
+			if (line.compare(0, sep, "batch_size") == 0) {
+				batchSamples = std::stof(line.substr(sep + 1));
+				break;
+			}
+		}
+	}
+	catch (const std::exception&) { /* keep the default */ }
+
+	try {
+		cnpy::NpyArray a = cnpy::npy_load(m_sOssInputDir + "ks_dshift.npy");
+		if (a.shape.size() != 1 || a.word_size != sizeof(float)) return;
+		const float* d = a.data<float>();
+		const size_t n = a.shape[0];
+		if (n == 0 || m_fSampRate <= 0.0f) return;
+
+		const float batchSec = batchSamples / m_fSampRate;
+		m_fKsTrainSec = (float)n * batchSec;
+
+		m_vfKsDrift.assign(d, d + n);
+		m_vfKsDriftTimeSec.resize(n);
+		for (size_t i = 0; i < n; ++i)
+			m_vfKsDriftTimeSec[i] = ((float)i - (float)n) * batchSec;
+	}
+	catch (const std::exception&) {
+		// No reference available; the live trace plots on its own.
+	}
 }
 
 void OutputGuiTab::plotProcessTimes(const ImVec2 windowCenter, bool &showProcessTimes) {

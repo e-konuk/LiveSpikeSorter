@@ -73,7 +73,7 @@ class OutputGuiTab {
 
 public:
 	//constructor and destructor
-	OutputGuiTab(std::string tabName); // Default constructor
+	OutputGuiTab(std::string tabName, std::string ossInputDir = "");
 	~OutputGuiTab();
 
 	//functions
@@ -118,6 +118,7 @@ private:
 	void plotVRMS(const ImVec2 windowCenter, bool &showVRMS);
 	void plotP2P(const ImVec2 windowCenter, bool &showP2P);
 	void plotDriftTrace(const ImVec2 windowCenter, bool& showDrift);
+	void loadDriftReference();
 	void displayTrialInfo(const ImVec2 windowCenter, bool &showTrialInfo);
 	void setMaxScanWindow(long m_lMaxScanWindow, float m_fSampRate);
 
@@ -159,10 +160,18 @@ private:
 	std::mutex processingTimeMutex;
 
 	// Drift trace variables
-	std::vector <float> m_vfDriftDepth; 
+	std::vector <float> m_vfDriftDepth;
 	std::vector <float> m_vfDriftTimeSec;
 	std::mutex driftMutex;
 	long m_lastDriftUpdateCt = -1;
+
+	// Offline Kilosort drift for the training recording, overlaid on the live trace
+	std::string         m_sOssInputDir;
+	std::vector<float>  m_vfKsDrift;
+	std::vector<float>  m_vfKsDriftTimeSec;
+	bool                m_bDriftRefLoaded = false;
+	float               m_fKsTrainSec     = 0.0f;  // training duration, seconds
+	bool                m_bDriftFollow    = true;  // auto-scroll x to the live trace
 };
 
 

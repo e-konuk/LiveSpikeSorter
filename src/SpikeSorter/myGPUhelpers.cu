@@ -146,9 +146,7 @@ __global__ void subtractSpikeContributions(
 	int spikeId = globalIdx / totalPerSpike;
 	int localIdx = globalIdx % totalPerSpike;
 
-	// Decode the spike's index: 
-	//   - temp: the template index
-	//   - sample: the sample location.
+	// Decode the spike's index
 	long spikeVal = d_spikeIndices[spikeId];
 	int sample = spikeVal % currBatchNumSamples;
 	int temp = spikeVal / currBatchNumSamples;
@@ -190,12 +188,12 @@ __global__ void subtractSpikeContributions(
 __global__ void subtractSpikeContributions_convOnly(
 	const long *d_spikeIndices, // spike indices array (length: numSpikes)
 	const float *d_amps,        // amplitudes (length: numSpikes)
-	long M,                   // Template length (used to determine offset)
-	long currBatchNumSamples, // Number of samples in the current batch
-	const float *d_ctc,       // [numTemplates x unclu_T x (2*M+1)]
-	long unclu_T,             // Number of convolution time bins
-	int numSpikes,            // Number of spikes in d_spikeIndices
-	float *d_convResult)      // [unclu_T x currBatchNumSamples]
+	long M,                     // Template length (used to determine offset)
+	long currBatchNumSamples,   // Number of samples in the current batch
+	const float *d_ctc,         // [numTemplates x unclu_T x (2*M+1)]
+	long unclu_T,               // Number of convolution time bins
+	int numSpikes,              // Number of spikes in d_spikeIndices
+	float *d_convResult)        // [unclu_T x currBatchNumSamples]
 {
 	// Each spike now produces convSize contributions.
 	const int convSize = unclu_T * (2 * M + 1);
@@ -268,16 +266,12 @@ __global__ void cross_correlation_kernel(const float* __restrict__ Wall3,
 	// Our inner dimension: sum_{k,c} becomes p from 0 to P-1.
 	const int P = K * C;
 
-	// Each block computes a BLOCK_SIZE x BLOCK_SIZE tile of the output.
-	// Compute the global row (t) and column (w) indices.
 	int t = blockIdx.x * BLOCK_SIZE + threadIdx.y;  // row index in output (T)
 	int w = blockIdx.y * BLOCK_SIZE + threadIdx.x;    // column index in output (W)
 
 	float sum = 0.0f;
 
 	// Declare shared memory tiles for A (from Wall3) and B (from B_in).
-	// A_tile holds a BLOCK_SIZE (output tile rows) x BLOCK_SIZE (inner tile) chunk.
-	// B_tile holds a BLOCK_SIZE (inner tile) x BLOCK_SIZE (output tile cols) chunk.
 	__shared__ float As[BLOCK_SIZE][BLOCK_SIZE];
 	__shared__ float Bs[BLOCK_SIZE][BLOCK_SIZE];
 
@@ -285,11 +279,6 @@ __global__ void cross_correlation_kernel(const float* __restrict__ Wall3,
 	// Each iteration loads one tile of the inner dimension.
 	for (int tile_idx = 0; tile_idx < (P + BLOCK_SIZE - 1) / BLOCK_SIZE; tile_idx++) {
 
-		// -----------------------------
-		// Load one tile from Wall3 into shared memory.
-		// For our GEMM, we want to load A[t, p] = Wall3[t, k, c]
-		// where p = tile_idx * BLOCK_SIZE + threadIdx.x,
-		// and k = p / C, c = p % C.
 		int pA = tile_idx * BLOCK_SIZE + threadIdx.x;
 		if (t < T && pA < P) {
 			int k_val = pA / C;    // integer division
@@ -301,10 +290,6 @@ __global__ void cross_correlation_kernel(const float* __restrict__ Wall3,
 			As[threadIdx.y][threadIdx.x] = 0.0f;
 		}
 
-		// -----------------------------
-		// Load one tile from B_in into shared memory.
-		// We define B[p, w] = B_in[c, k, w] where p = tile_idx * BLOCK_SIZE + threadIdx.y,
-		// with k = p / C and c = p % C.
 		int pB = tile_idx * BLOCK_SIZE + threadIdx.y;
 		if (pB < P && w < W) {
 			int k_val = pB / C;
@@ -319,7 +304,6 @@ __global__ void cross_correlation_kernel(const float* __restrict__ Wall3,
 		// Make sure the tiles are fully loaded before computing.
 		__syncthreads();
 
-		// -----------------------------
 		// Compute partial sum over this tile.
 #pragma unroll
 		for (int i = 0; i < BLOCK_SIZE; i++) {
@@ -363,8 +347,7 @@ __global__ void conv1d(
 	int currBatchNumSamples
 )
 {
-	// Each thread will compute exactly one output element: B[n, k, w]
-	//  totalOutputs = C*K*currBatchNumSamples
+
 	int globalIndex = blockIdx.x * blockDim.x + threadIdx.x;
 	int totalOutputs = C * K * currBatchNumSamples;
 	if (globalIndex >= totalOutputs) return;
@@ -393,9 +376,6 @@ __global__ void conv1d(
 		}
 	}
 
-	// Store to B[n, k, w]
-	// B is [C, K, currBatchNumSamples]
-	// linear index in B => n*(K*currBatchNumSamples) + k*currBatchNumSamples + w
 	d_batchPCA[globalIndex] = val;
 }
 
@@ -426,9 +406,6 @@ __global__ void find_matching_indices_kernel(const float* __restrict__ d_Cfmaxpo
 	int max_out,
 	int* __restrict__ globalCount)
 {
-	// Optionally load d_Cfmaxpool into shared memory if it fits.
-	// Gate the WRITE on the same condition as the READ below so we never
-	// touch shared memory when the launch reserved zero bytes for it.
 	extern __shared__ float s_Cfmaxpool[];
 	const bool use_shared = (W <= blockDim.x);
 	if (use_shared && threadIdx.x < W)
@@ -456,17 +433,11 @@ __global__ void find_matching_indices_kernel(const float* __restrict__ d_Cfmaxpo
 				// Prefetch d_Cf[i] into a register.
 				float cf_val = d_Cf[i];
 
-				// Get the corresponding d_Cfmaxpool value.
-				// If W is small (fits in shared memory), use shared memory.
-				// Otherwise, use __ldg to prefetch via the read-only cache.
 				float cfmax_val = use_shared ? s_Cfmaxpool[samp] : __ldg(&d_Cfmaxpool[samp]);
 
 				// Check the predicate: compare (nearly equal) and ensure cfmax_val >= Th.
 				if (fabsf(cfmax_val - cf_val) < 0.0001f && cfmax_val >= Th)
 				{
-					// Reserve a slot, then only write if it fits. globalCount
-					// still increments past max_out so the host can detect
-					// overflow; the surplus matches are discarded.
 					int pos = atomicAdd(globalCount, 1);
 					if (pos < max_out) {
 						out[pos] = i;
@@ -635,9 +606,58 @@ void DriftCorrectOnGPU(cublasHandle_t& Handle, float *matA, float *matB, float *
 
 }
 
-void ComputeDriftMat(int y_shift, float* d_result)
+__global__ void build_Kyx_kernel(const float* __restrict__ xc,
+                                 const float* __restrict__ yc,
+                                 float shiftUm, float invTwoSig2, int C,
+                                 float* __restrict__ Kyx)
+{
+	int i = blockIdx.y * blockDim.y + threadIdx.y; // row (query point)
+	int j = blockIdx.x * blockDim.x + threadIdx.x; // col (source point)
+	if (i < C && j < C) {
+		float dx = xc[i] - xc[j];
+		float dy = (yc[i] - shiftUm) - yc[j];
+		Kyx[i * C + j] = expf(-(dx * dx + dy * dy) * invTwoSig2);
+	}
+}
+
+__global__ void transpose_square_kernel(const float* __restrict__ in,
+                                        float* __restrict__ out, int C)
+{
+	int i = blockIdx.y * blockDim.y + threadIdx.y;
+	int j = blockIdx.x * blockDim.x + threadIdx.x;
+	if (i < C && j < C) {
+		out[j * C + i] = in[i * C + j];
+	}
+}
+
+void ComputeDriftMat(cublasHandle_t& handle, cudaStream_t stream,
+                     const float* d_xc, const float* d_yc, const float* d_iKxx,
+                     float* d_Kyx, float sigInterp, float shiftUm, int C,
+                     float* d_result, bool transposeResult)
 {
 	static const char *ptLabel = { "ComputeDriftMat" };
+
+	if (sigInterp <= 0.0f) {
+		_RUN_ERROR(ptLabel, "sig_interp must be positive");
+	}
+
+	dim3 block(BLOCK_SIZE, BLOCK_SIZE);
+	dim3 grid((C + block.x - 1) / block.x, (C + block.y - 1) / block.y);
+
+	const float invTwoSig2 = 1.0f / (2.0f * sigInterp * sigInterp);
+	build_Kyx_kernel <<<grid, block, 0, stream>>> (d_xc, d_yc, shiftUm,
+	                                               invTwoSig2, C, d_Kyx);
+
+	// M = Kyx @ iKxx
+	cublasSetStream(handle, stream);
+	matMul(handle, d_Kyx, d_iKxx, d_result, C, C, C);
+
+	if (transposeResult) {
+		// d_Kyx is dead after the matmul, so reuse it as transpose scratch.
+		transpose_square_kernel <<<grid, block, 0, stream>>> (d_result, d_Kyx, C);
+		_CUDA_CALL(cudaMemcpyAsync(d_result, d_Kyx, (size_t)C * C * sizeof(float),
+		                           cudaMemcpyDeviceToDevice, stream));
+	}
 }
 
 void WhitenOnGPU(cublasHandle_t& Handle, float *matA, float *matB, float *matC, long lW, long lC) {
@@ -681,8 +701,6 @@ void highpass(cufftHandle planForward, cufftHandle planInverse, float* d_batch, 
 	cufftExecR2C(planForward, d_batch, d_hpworkspace);
 	_CUDA_CALL(cudaDeviceSynchronize());
 
-	// Multiply every frequency component by the conjugate of fwav.
-	// We reinterpret fwav as a cufftComplex pointer.
 	int gridSize = (total + block_size - 1) / block_size;
 
 	const cufftComplex* d_fwav = reinterpret_cast<const cufftComplex*>(fwav);
@@ -781,20 +799,6 @@ void updateResidual(
 		d_convResult
 		);
 
-	/*
-	threadsPerBlock = 256;
-	totalThreads = static_cast<int>(d_spikeIndices.size()) * convSize;
-	blocksPerGrid = (totalThreads + threadsPerBlock - 1) / threadsPerBlock;
-	subtractSpikeContributions_convOnly << <blocksPerGrid, threadsPerBlock >> > (
-		thrust::raw_pointer_cast(d_spikeIndices.data()), // spike indices array (length: numSpikes)
-		d_amps,        // amplitudes (length: numSpikes)
-		M,                   // Template length (used to determine offset)
-		currBatchNumSamples, // Number of samples in the current batch
-		d_ctc,       // [numTemplates x unclu_T x (2*M+1)]
-		unclu_T,             // Number of convolution time bins
-		static_cast<int>(d_spikeIndices.size()),            // Number of spikes in d_spikeIndices
-		d_convResult);      // [unclu_T x currBatchNumSamples]*/
-
 	_CUDA_CALL(cudaDeviceSynchronize());
 }
 
@@ -887,11 +891,6 @@ void findMatchingIndices(const float* d_Cfmaxpool,
 	// Total number of elements in d_Cf.
 	int N = T * currBatchNumSamples;
 
-	// Allocate the output vector. The theoretical maximum is one match per
-	// M-sample window (currBatchNumSamples / M), but floating-point ties
-	// between templates and edge effects can produce more. Use a generous
-	// 8x slack with a 1024 floor so the bounds check inside the kernel never
-	// has to discard matches under realistic neural data.
 	const long mClamped = (M > 0) ? M : 1;
 	const int max_matches = std::max<int>(
 		1024,
@@ -904,8 +903,6 @@ void findMatchingIndices(const float* d_Cfmaxpool,
 	// We want enough blocks so that each thread processes UNROLL elements per iteration.
 	int blocks = (N + DEFAULT_TPB * UNROLL - 1) / (DEFAULT_TPB * UNROLL);
 
-	// If W is small enough, load all d_Cfmaxpool into shared memory.
-	// (Otherwise, we set shared memory size to 0.)
 	int sharedMemSize = (currBatchNumSamples <= DEFAULT_TPB) ? currBatchNumSamples * sizeof(float) : 0;
 
 	// Get the raw pointer to the output data.
@@ -922,8 +919,6 @@ void findMatchingIndices(const float* d_Cfmaxpool,
 		d_count);
 	_CUDA_CALL(cudaDeviceSynchronize()); // (For debugging; remove in production)
 
-	// Copy the global counter back to host. This is the raw atomicAdd total,
-	// which may exceed max_matches if there was overflow inside the kernel.
 	int h_count = 0;
 	cudaMemcpy(&h_count, d_count, sizeof(int), cudaMemcpyDeviceToHost);
 
@@ -942,7 +937,7 @@ void findMatchingIndices(const float* d_Cfmaxpool,
 void medianRemove(float* data, int C, int currBatchNumSamples) {
 	static const char* ptLabel = { "OnlineSpikesV2::removeMedianHost" };
 
-	int blockSize = MAX_CHANNELS; // we use sorting algorithm that operates on fixed number of entries
+	int blockSize = MAX_CHANNELS; // algorithm operates on fixed number of entries
 	int numBlocks = currBatchNumSamples;
 	median_remove_kernel << <numBlocks, blockSize >> > (data, C, currBatchNumSamples);
 	_CUDA_CALL(cudaDeviceSynchronize());

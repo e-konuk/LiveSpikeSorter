@@ -379,6 +379,16 @@ void OnlineSpikesV2::initializeSorter(InputParameters params) {
 
 	// No idea what this does ngl
 	for (int i = 0; i < C; i++) activeChannels.push_back(i);
+
+	// --- Live rigid drift estimation ---
+	DriftParams driftParams;
+	driftParams.enabled = params.bDriftEstimation;
+	driftParams.windowSeconds = params.fDriftWindowSeconds;
+	driftParams.maxShiftUm = params.fDriftMaxShiftUm;
+
+	driftEstimator.load(params.sInputFolder, C, W, params.uSelectedDevice,
+	                    samplingRate, d_xc, d_yc, d_driftMatrix, d_driftMatrixB,
+	                    driftParams);
 }
 
 void OnlineSpikesV2::establishDecoderConnection(sockaddr_in mainAddr)
@@ -800,14 +810,27 @@ void OnlineSpikesV2::runSpikeSorting()
 		}
 		_CUDA_CALL(cudaDeviceSynchronize());
 
-		// Drift correct
+		// Estimate drift from the whitened (UNCORRECTED) batch.
+		//
+		// ORDER MATTERS d_fetchBuf currently holds the whitened data, and the correction below writes d_fetchBuf2
+		// Measuring here keeps the estimator open loop it sees the drift that is still in the data, not the residual 
+		// after our own correction. Measuring after the correction will read a flat trace no matter how much the
+		// probe actually moved.
+		if (driftEstimator.isEnabled()) {
+			Timer timer("driftEstimation()");
+			driftEstimator.detectAndAccumulate(d_fetchBuf, currBatchNumSamples, latestCt);
+			_CUDA_CALL(cudaDeviceSynchronize());
+		}
+
+		// Drift correct. The matrix is double-buffered and hot-swapped by the drift worker, read the pointer once per batch.
 		{
 			Timer timer("driftCorrection()");
-			matMul(cublasHandle, d_driftMatrix, d_fetchBuf, d_fetchBuf2, C, C, currBatchNumSamples);
+			const float* driftMat = driftEstimator.activeDriftMatrix();
+			matMul(cublasHandle, driftMat, d_fetchBuf, d_fetchBuf2, C, C, currBatchNumSamples);
 		}
 		_CUDA_CALL(cudaDeviceSynchronize());
 		
-		// Perform OMP
+		// OMP
 		numSpikes = kilosortMatchingPursuit(d_fetchBuf2, currBatchNumSamples);
 
 		// Use results of OMP to assign unmapped spike templates to the closest clusters
@@ -825,15 +848,22 @@ void OnlineSpikesV2::runSpikeSorting()
 		long processTime = GetTimeDiff(batchAfter, batchBefore);
 
 		// Send relevant data to decoder
-		OnlineSpikesPayload payload = { recordingOffset, 
+		OnlineSpikesPayload payload = { recordingOffset,
 								latestCt,
 								times,
 								templates,
 								amplitudes,
 								rootMeanSquared,
 								p2p,
-								processTime 
+								processTime
 		};
+
+		// Latest drift estimate.
+		{
+			DriftStatus ds = driftEstimator.status();
+			payload.driftShiftUm = ds.shiftUm;
+			payload.driftUpdateCt = ds.updateCt;
+		}
 
 		sendPayload(&imecFm, payload, decoderImecAddr);
 		//duplicate check in save spikes

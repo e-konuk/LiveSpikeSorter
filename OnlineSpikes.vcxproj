@@ -150,6 +150,9 @@ copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll
     <CudaCompile Include="src\SpikeSorter\OnlineSpikesV2.cu">
       <FileType>CppCode</FileType>
     </CudaCompile>
+    <CudaCompile Include="src\SpikeSorter\DriftEstimator.cu">
+      <FileType>CppCode</FileType>
+    </CudaCompile>
     <ClCompile Include="src\Decoder\BaseModel.cpp" />
     <ClCompile Include="src\Decoder\RegressionModel.cpp" />
     <ClCompile Include="src\Decoder\SKLearnModel.cpp" />
@@ -199,6 +202,8 @@ copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll
     <ClInclude Include="src\SpikeSorter\myCublasError.h" />
     <ClInclude Include="src\SpikeSorter\OnlineSpikesV2MemoryList.h" />
     <ClInclude Include="src\SpikeSorter\OnlineSpikesV2.h" />
+    <ClInclude Include="src\SpikeSorter\DriftEstimator.h" />
+    <ClInclude Include="src\SpikeSorter\DriftFingerprint.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="External\CNPY\cnpy.h" />
     <ClInclude Include="src\Decoder\dataBinner.h" />

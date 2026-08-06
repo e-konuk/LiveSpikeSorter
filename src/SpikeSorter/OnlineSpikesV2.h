@@ -21,6 +21,7 @@
 #include "../Networking/FragmentManager.h"
 #include "OnlineSpikesV2MemoryList.h"
 #include "TensorWrapper.h"
+#include "DriftEstimator.h"
 
 #include <thrust/device_vector.h>
 #include <thrust/copy.h>
@@ -128,6 +129,9 @@ private:
 
 	// Leftover stuff from previous code
 	std::vector<double> activeChannels;
+
+	// Live rigid drift estimation. Stays inert
+	DriftEstimator driftEstimator;
 
 	// Thrust vector for matching to find local maxima, change later to normal device vector
 	thrust::device_vector<long> d_spikeIndices;

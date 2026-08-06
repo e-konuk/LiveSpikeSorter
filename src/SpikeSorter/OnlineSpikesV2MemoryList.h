@@ -1,15 +1,5 @@
 #pragma once
-
-/*
-	Hacky X-macros to help make life much easier, but obfuscates compilation errors to near unparsability.
-	Defining a new entry here will automatically populate class members in OnlineSpikesV2.h, populate code inOnlineSpikesV2::allocateMemory(),
-	while also populating OnlineSpikesV2::~OnlineSpikesV2(). 
-	
-	If the amount of memory you want is dependent on a variable `foo`, one must have `foo` be defined as a member 
-	of OnlineSpikesV2 prior to the allocateMemory() call performed in the constructor.
-
-	TODO: Remove some now-unused entries from here.
-*/
+// TODO: Remove some now-unused entries from here.
 
 enum MemoryType {
 	Host,		// memory that will be allocated on the heap as an array with: name = new type[size];
@@ -59,6 +49,7 @@ enum MemoryType {
 	X(float, d_Wall3, Device, unclu_T * K * C) \
 	X(float, d_templateWaveforms, Device, unclu_T * M * C) \
 	X(float, d_driftMatrix, Device, C * C) \
+	X(float, d_driftMatrixB, Device, C * C) \
 	X(float, d_nm, Device, unclu_T) \
 	X(float, d_batchPCA, Device, C * K * W) \
 	X(float, d_maxAtTime, Device, W) \

@@ -31,19 +31,16 @@ Live Spike Sorter (LSS) is a GPU-accelerated real-time spike sorter for extracel
 
 Create a virtual environment with Python 3.10 and install the required packages:
 
-python \-m venv venv
-
-venv\\Scripts\\activate
+```bash
+python -m venv venv
+venv\Scripts\activate
 
 pip install kilosort==4.0.13
-
-pip install torch==1.12.0+cu113 \-f https://download.pytorch.org/whl/torch\_stable.html
-
-pip install "numpy\<2" scipy scikit-learn matplotlib h5py
-
+pip install torch==1.12.0+cu113 -f https://download.pytorch.org/whl/torch_stable.html
+pip install "numpy<2" scipy scikit-learn matplotlib h5py
 pip install spikeinterface probeinterface
-
 pip install h5py pyqtgraph PyQt5
+```
 
 ## Running Kilosort4 (Template Learning)
 

@@ -677,11 +677,22 @@ void DriftEstimator::processWindow(std::vector<float> depths,
 	m_spikeCount.store((long)depths.size(), std::memory_order_relaxed);
 	m_clamped.store(clamped, std::memory_order_relaxed);
 
-	std::cout << "[Drift] window " << m_windowCount << ": " << depths.size()
-	          << " spikes, shift " << shiftUm << " um"
-	          << (clamped ? "  [CLAMPED]" : "")
-	          << (coarseRailed ? "  [SEARCH RANGE HIT]" : "")
-	          << "  (coverage " << coverage << ", " << batches << " batches"
-	          << ", clamped " << m_clampCount << "/" << m_windowCount << ")"
-	          << std::endl;
+
+	// -----------------------------------------------------------------------------
+	// DIAGNOSTIC OUTPUT TO PRINT ONCE PER WINDOW 
+	// -----------------------------------------------------------------------------
+	// // Spikes detected, shift, how many windows clamped, coverage, batches, search range hit 
+	// std::cout << "[Drift] window " << m_windowCount << ": " << depths.size()
+	//           << " spikes, shift " << shiftUm << " um"
+	//           << (clamped ? "  [CLAMPED]" : "")
+	//           << (coarseRailed ? "  [SEARCH RANGE HIT]" : "")
+	//           << "  (coverage " << coverage << ", " << batches << " batches"
+	//           << ", clamped " << m_clampCount << "/" << m_windowCount << ")"
+	//           << std::endl;
+
+	// -----------------------------------------------------------------------------
+	// // Vram usage
+	// size_t freeB, totalB; cudaMemGetInfo(&freeB, &totalB);
+	// std::cout << "[Drift] VRAM used " << (totalB - freeB) / (1<<20) << "MB\n";
+
 }

@@ -315,6 +315,14 @@ OnlineSpikesV2::~OnlineSpikesV2()
 		MEMORY_VARIABLES
 	#undef X
 
+	// Destroy the cached high-pass cuFFT plans (see highpassFilter)
+	for (auto& kv : m_hpPlanCache) {
+		cufftDestroy(kv.second.fwdBatch);
+		cufftDestroy(kv.second.fwdFilter);
+		cufftDestroy(kv.second.invBatch);
+	}
+	m_hpPlanCache.clear();
+
 	// Close files and perform other cleanup
 	spikesFileOut.close();
 }
@@ -1047,29 +1055,34 @@ void OnlineSpikesV2::highpassFilter(float* d_batch, int C, int currBatchNumSampl
 	_CUDA_CALL(cudaMemcpy(d_hpFilterSub, d_hpFilterFull + cropLen, currBatchNumSamples * sizeof(float), cudaMemcpyDeviceToDevice));
 	_CUDA_CALL(cudaDeviceSynchronize());
 
-	// Grab plan for forward-FFT
+	// Fetch (or build once) the cuFFT plans for this transform length. Previously
+	// these three plans were created and destroyed every batch, which fragmented
+	// the driver's VRAM pool without bound once the batch length started varying.
+	// Same plan parameters as before -- only their lifetime changed.
 	int dims[1] = { currBatchNumSamples };
-	cufftHandle batchPlanForward;
-	cufftPlanMany(&batchPlanForward, 1, dims, IGNORE, IGNORE, IGNORE, IGNORE, IGNORE, IGNORE, CUFFT_C2C, C);
-
-	cufftHandle filterPlanForward;
-	cufftPlanMany(&filterPlanForward, 1, dims, IGNORE, IGNORE, IGNORE, IGNORE, IGNORE, IGNORE, CUFFT_C2C, 1);
+	HpFftPlans& plans = m_hpPlanCache[currBatchNumSamples];
+	if (!plans.created) {
+		if (cufftPlanMany(&plans.fwdBatch,  1, dims, IGNORE, IGNORE, IGNORE, IGNORE, IGNORE, IGNORE, CUFFT_C2C, C) != CUFFT_SUCCESS ||
+		    cufftPlanMany(&plans.fwdFilter, 1, dims, IGNORE, IGNORE, IGNORE, IGNORE, IGNORE, IGNORE, CUFFT_C2C, 1) != CUFFT_SUCCESS ||
+		    cufftPlanMany(&plans.invBatch,  1, dims, IGNORE, IGNORE, IGNORE, IGNORE, IGNORE, IGNORE, CUFFT_C2C, C) != CUFFT_SUCCESS) {
+			_RUN_ERROR(ptLabel, "Failed to create cuFFT plans for the high-pass filter");
+		}
+		plans.created = true;
+	}
 
 	// Lift from real to complex, d_hpworkspace will contain the frequency data at the end
 	float_to_cufftComplex(d_batch, d_hpworkspace, C * currBatchNumSamples);
 	float_to_cufftComplex(d_hpFilterSub, d_hpworkspace2, currBatchNumSamples);
 
 	// Perform FFT for filter + batch
-	cufftExecC2C(batchPlanForward,  d_hpworkspace,  d_batchFreq,    CUFFT_FORWARD);
-	cufftExecC2C(filterPlanForward, d_hpworkspace2, d_hpFilterFreq, CUFFT_FORWARD);
+	cufftExecC2C(plans.fwdBatch,  d_hpworkspace,  d_batchFreq,    CUFFT_FORWARD);
+	cufftExecC2C(plans.fwdFilter, d_hpworkspace2, d_hpFilterFreq, CUFFT_FORWARD);
 
 	// Apply filter
 	applyFilter(d_batchFreq, d_hpFilterFreq, currBatchNumSamples, C);
 
 	// Perform inverse FFT
-	cufftHandle batchPlanInverse;
-	cufftPlanMany(&batchPlanInverse, 1, dims, IGNORE, IGNORE, IGNORE, IGNORE, IGNORE, IGNORE, CUFFT_C2C, C);
-	cufftExecC2C(batchPlanInverse, d_batchFreq, d_hpworkspace, CUFFT_INVERSE);
+	cufftExecC2C(plans.invBatch, d_batchFreq, d_hpworkspace, CUFFT_INVERSE);
 
 	// Extract real part
 	cufftComplex_to_float(d_hpworkspace, d_batch, C * currBatchNumSamples);
@@ -1080,9 +1093,6 @@ void OnlineSpikesV2::highpassFilter(float* d_batch, int C, int currBatchNumSampl
 
 	_CUDA_CALL(cudaMemcpy(d_batch, d_shifted, C * currBatchNumSamples * sizeof(float), cudaMemcpyDeviceToDevice));
 	_CUDA_CALL(cudaDeviceSynchronize());
-	cufftDestroy(batchPlanForward);
-	cufftDestroy(batchPlanInverse);
-	cufftDestroy(filterPlanForward);
 }
 
 int OnlineSpikesV2::closestCluster(const float x, const float y)

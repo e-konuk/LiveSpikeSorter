@@ -5,6 +5,7 @@
 #include <random>
 #include <future>
 #include <fstream>
+#include <unordered_map>
 
 #include <cublas_v2.h>
 #include <cusolverDn.h>
@@ -80,6 +81,15 @@ private:
 	cublasHandle_t		cublasHandle; // handle for cublas computations
 	cusolverDnHandle_t  cuSolverHandle; // handle for cusolver computations
 	int filterLen;
+
+	// Cached cuFFT plans for highpassFilter(), this should cap VRAM usage so it stops increasing with recording duration
+	struct HpFftPlans {
+		cufftHandle fwdBatch;
+		cufftHandle fwdFilter;
+		cufftHandle invBatch;
+		bool created = false;
+	};
+	std::unordered_map<int, HpFftPlans> m_hpPlanCache;
 
 	static const int NOT_MAPPED = -1;
 	long K; // number of principal components

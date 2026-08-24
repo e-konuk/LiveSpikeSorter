@@ -681,14 +681,16 @@ void DriftEstimator::processWindow(std::vector<float> depths,
 	// -----------------------------------------------------------------------------
 	// DIAGNOSTIC OUTPUT TO PRINT ONCE PER WINDOW 
 	// -----------------------------------------------------------------------------
-	// // Spikes detected, shift, how many windows clamped, coverage, batches, search range hit 
-	// std::cout << "[Drift] window " << m_windowCount << ": " << depths.size()
-	//           << " spikes, shift " << shiftUm << " um"
-	//           << (clamped ? "  [CLAMPED]" : "")
-	//           << (coarseRailed ? "  [SEARCH RANGE HIT]" : "")
-	//           << "  (coverage " << coverage << ", " << batches << " batches"
-	//           << ", clamped " << m_clampCount << "/" << m_windowCount << ")"
-	//           << std::endl;
+
+	// Needed for drift diagnostic script - copy output into run_log.txt and run `python drift_compare.py run_log.txt`
+	// Spikes detected, shift, how many windows clamped, coverage, batches, search range hit 
+	std::cout << "[Drift] window " << m_windowCount << ": " << depths.size()
+	          << " spikes, shift " << shiftUm << " um"
+	          << (clamped ? "  [CLAMPED]" : "")
+	          << (coarseRailed ? "  [SEARCH RANGE HIT]" : "")
+	          << "  (coverage " << coverage << ", " << batches << " batches"
+	          << ", clamped " << m_clampCount << "/" << m_windowCount << ")"
+	          << std::endl;
 
 	// -----------------------------------------------------------------------------
 	// // Vram usage

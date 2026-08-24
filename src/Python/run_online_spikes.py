@@ -56,7 +56,7 @@ tk.Entry(daq_frame, textvariable=sglx_port_var, width=15).grid(row=2, column=1, 
 tk.Button(daq_frame, text="?", command=lambda: show_hint("SGLX_PORT"), width=3).grid(row=2, column=3)
 
 # Drift-correction parameters (shared across all sorters)
-drift_enabled_var = tk.BooleanVar(value=True)
+drift_enabled_var = tk.BooleanVar(value=False)
 drift_window_var = tk.StringVar(value="10")
 drift_max_shift_var = tk.StringVar(value="50")
 
@@ -90,6 +90,7 @@ bin_file_vars, meta_file_vars, chanmap_file_vars = [], [], []
 rerun_ks_vars, sdm_vars = [], []
 sdm_ip_vars, sdm_port_vars = [], []
 sdm_subset_vars, sdm_trigger_z_vars, sdm_baseline_min_seconds_vars, sdm_trigger_bin_ms_vars = [], [], [], []
+sdm_processor_vars = []
 max_templates_vars = []
 channel_range_vars = []
 file_frames, sdm_frames = [], []
@@ -102,6 +103,10 @@ HINTS = {
     "META": "The location of your recording's metadata (.meta file).",
     "CHANMAP": "The location of your probe's channel map (.mat file).",
     "SDM": "Send decoder output to stimulus display machine?",
+    "SDM_PROCESSOR": ("How spike activity is turned into an SDM packet, and the "
+                      "transport used. 'zscore' / 'logreg' send a 13-byte UDP packet "
+                      "(int8 direction, float32 z, uint64 sampleCt) Use 'zscore' for the "
+                      "firing-threshold trigger loop."),
     "MAX_TEMPLATES": ("Limit how many preclustered templates the sorter uses "
                       "(0 = use all). Fewer templates = less GPU work in "
                       "matchingPursuit = better real-time performance on low-spec "
@@ -185,6 +190,7 @@ def update_tabs():
                     meta_file_vars, chanmap_file_vars, rerun_ks_vars,
                     sdm_vars, sdm_ip_vars, sdm_port_vars,
                     sdm_subset_vars, sdm_trigger_z_vars, sdm_baseline_min_seconds_vars, sdm_trigger_bin_ms_vars,
+                    sdm_processor_vars,
                     max_templates_vars, channel_range_vars, file_frames, sdm_frames):
             del lst[n:]
 
@@ -203,6 +209,7 @@ def update_tabs():
         sdm_trigger_z_vars.append(tk.StringVar(value="1.0"))
         sdm_baseline_min_seconds_vars.append(tk.StringVar(value="10.0"))
         sdm_trigger_bin_ms_vars.append(tk.StringVar(value="100"))
+        sdm_processor_vars.append(tk.StringVar(value="zscore"))
         max_templates_vars.append(tk.StringVar(value="0"))
         channel_range_vars.append(tk.StringVar(value=""))
         file_frames.append(None)
@@ -342,6 +349,17 @@ def build_tab(frame, idx):
     tk.Entry(sdm_frame, textvariable=sdm_trigger_bin_ms_vars[idx], width=10).grid(
         row=5, column=1
     )
+
+    tk.Label(sdm_frame, text="Processor (transport):").grid(
+        row=6, column=0, padx=5, pady=5
+    )
+    tk.OptionMenu(sdm_frame, sdm_processor_vars[idx],
+                  "zscore", "logreg", "bincounts").grid(
+        row=6, column=1, sticky="w"
+    )
+    tk.Button(
+        sdm_frame, text="?", command=lambda i=idx: show_hint("SDM_PROCESSOR"), width=3
+    ).grid(row=6, column=2)
     if sdm_vars[idx].get():
         sdm_frame.grid(row=row, column=0, columnspan=4,
                        padx=5, pady=5)
@@ -445,6 +463,7 @@ def main():
             sdm_trigger_z_vars[i].set(state.get("sdm_trigger_zs", ["1.0"] * num_sorters_var.get())[i])
             sdm_baseline_min_seconds_vars[i].set(state.get("sdm_baseline_min_seconds", ["10.0"] * num_sorters_var.get())[i])
             sdm_trigger_bin_ms_vars[i].set(state.get("sdm_trigger_bin_ms", ["50"] * num_sorters_var.get())[i])
+            sdm_processor_vars[i].set(state.get("sdm_processors", ["zscore"] * num_sorters_var.get())[i])
             max_templates_vars[i].set(state.get("max_templates", ["0"] * num_sorters_var.get())[i])
             channel_range_vars[i].set(state.get("channel_ranges", [""] * num_sorters_var.get())[i])
 
@@ -470,6 +489,7 @@ def run_online_multi():
     SDM_TRIGGER_ZS = [v.get().strip() for v in sdm_trigger_z_vars]
     SDM_BASELINE_MIN_SECONDS = [v.get().strip() for v in sdm_baseline_min_seconds_vars]
     SDM_TRIGGER_BIN_MS = [v.get().strip() for v in sdm_trigger_bin_ms_vars]
+    SDM_PROCESSORS = [v.get().strip() for v in sdm_processor_vars]
     MAX_TEMPLATES = [v.get().strip() for v in max_templates_vars]
     CHANNEL_RANGES = [v.get().strip() for v in channel_range_vars]
     SGLX_HOST = sglx_host_var.get().strip()
@@ -499,6 +519,7 @@ def run_online_multi():
         "sdm_trigger_zs": SDM_TRIGGER_ZS,
         "sdm_baseline_min_seconds": SDM_BASELINE_MIN_SECONDS,
         "sdm_trigger_bin_ms": SDM_TRIGGER_BIN_MS,
+        "sdm_processors": SDM_PROCESSORS,
         "max_templates": MAX_TEMPLATES,
         "channel_ranges": CHANNEL_RANGES
     }
@@ -540,7 +561,7 @@ def run_online_multi():
 
         arguments['--sdm_ip'] = SDM_IPS[sdm_idx]
         arguments['--sdm_port'] = sdm_port
-        arguments['--sdm_processor'] = 'bincounts'
+        arguments['--sdm_processor'] = SDM_PROCESSORS[sdm_idx] or 'zscore'
 
         if SDM_SUBSETS[sdm_idx]:
             arguments['--sdm_subset'] = SDM_SUBSETS[sdm_idx]

@@ -14,6 +14,7 @@ extern ImGuiID g_rasterDockNode;
 #include "../Networking/sorterParameters.h"
 #include "../Networking/onlineSpikesPayload.h"
 #include "../Networking/NetworkHelpers.h"
+#include "../Helpers/RetrainSignal.h"   // g_retrainRequested (drift retrain feature)
 
 #include "OutputGuiTab.h"
 
@@ -26,7 +27,8 @@ static std::string formatFixed2(double val) {
 	return std::string(buf);
 }
 
-OutputGuiTab::OutputGuiTab(std::string tabName, std::string ossInputDir) :
+OutputGuiTab::OutputGuiTab(std::string tabName, std::string ossInputDir, float retrainThresholdUm) :
+	m_fRetrainThresholdUm(retrainThresholdUm),
 	m_lT(0),
 	m_lC(0),
 	m_lM(0),
@@ -544,7 +546,48 @@ void OutputGuiTab::plotDriftTrace(const ImVec2 windowCenter, bool &showDrift) {
 
 	if (!m_bDriftRefLoaded) loadDriftReference();
 
-	
+	// --- Drift retrain controls -------------------------------------------
+	// TODO:
+	// - Consider moving this to a serpeate window
+	// - Allow user to subset last M minutes of recorded data for retraining
+	// 		- How do we resolve training data now being a subset of test? Files on disk are still the same
+	const float latestDrift = ys.back();
+	if (m_fRetrainThresholdUm > 0.0f && std::fabs(latestDrift) >= m_fRetrainThresholdUm) {
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.2f, 1.0f));
+		ImGui::TextWrapped("Drift %.1f um exceeds %.1f um. Consider retraining templates.",
+		                   latestDrift, m_fRetrainThresholdUm);
+		ImGui::PopStyleColor();
+	}
+
+	// "Retrain templates" button
+	if (!g_retrainRequested.load()) {
+		if (ImGui::Button("Retrain templates"))
+			ImGui::OpenPopup("Retrain templates?");
+	}
+	else {
+		ImGui::TextUnformatted("Retraining requested -- sorting will stop shortly.");
+	}
+
+	if (ImGui::BeginPopupModal("Retrain templates?", nullptr,
+	                           ImGuiWindowFlags_AlwaysAutoResize)) {
+		ImGui::TextUnformatted(
+			"Live sorting will STOP now and will not resume until Kilosort4\n"
+			"finishes retraining on the data recorded so far. On a long\n"
+			"recording this can take many minutes, and incoming data during\n"
+			"retraining is NOT sorted.\n\n"
+			"Continue?");
+		ImGui::Separator();
+		if (ImGui::Button("Retrain now", ImVec2(140, 0))) {
+			g_retrainRequested.store(true);
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel", ImVec2(140, 0)))
+			ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+	// ----------------------------------------------------------------------
+
 	ImGui::Checkbox("Follow live", &m_bDriftFollow);
 
 	if (ImPlot::BeginPlot("Estimated drift over time", ImVec2(-1, -1))) {

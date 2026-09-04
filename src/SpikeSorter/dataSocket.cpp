@@ -89,6 +89,28 @@ t_ull StreamDataSocket::getStreamSampleCt(int streamType, OSSSpecificParams osPa
 	return sampleCt;
 }
 
+// Drift retrain
+bool StreamDataSocket::getSaveInfo(RetrainSaveInfo& info, OSSSpecificParams osParams) {
+	std::unique_lock<std::mutex> lock(sglxMutex);
+
+	bool ok = true;
+	ok &= sglx_isSaving(info.saving, S);
+	ok &= sglx_getDataDir(info.dataDir, S, 0);
+	ok &= sglx_getRunName(info.runName, S);
+	ok &= sglx_getParams(info.params, S);
+
+	info.fileStart   = sglx_getStreamFileStart(S, IMEC, osParams.substream);
+	info.sampleCount = sglx_getStreamSampleCount(S, IMEC, osParams.substream);
+
+	return ok;
+}
+
+// Close SpikeGLX recording file 
+bool StreamDataSocket::finalizeRecording() {
+	std::unique_lock<std::mutex> lock(sglxMutex);
+	return sglx_setRecordingEnable(S, false);
+}
+
 // sglx_fetch returns the sample count index of first sample in matrix, or zero if error. StreamDataSocket::fetch, however,
 // returns the sample count index of the last sample in matrix.
 t_ull StreamDataSocket::fetch(std::vector<short> &data, t_sglxconn &S, int streamType, int substream, t_ull startSamp, int maxSamps, const std::vector<int> &channelSubset) {

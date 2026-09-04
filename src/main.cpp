@@ -12,7 +12,12 @@
 
 #include "SpikeSorter/dataSocket.h" // for decoder to access getStreamSampleCt()
 
+#include "Helpers/RetrainSignal.h"
+
 #include <npp.h> // to get the number of GPU devices
+
+
+std::atomic<bool> g_retrainRequested{ false };
 
 #include <algorithm>
 #include <sstream>
@@ -194,6 +199,67 @@ InputParameters parseCmdArgs(int argc, char* argv[]) {
 			cmdLineParams.sdmProcessorType = argv[i + 1];
 			std::cout << "SDM processor type: " << cmdLineParams.sdmProcessorType << std::endl;
 		}
+		else if (arg == "--sdm_mode") {
+			if (i + 1 >= argc) {
+				std::cout << "Must supply mode (median|zscore) after --sdm_mode" << std::endl;
+				exit(EXIT_SUCCESS);
+			}
+			cmdLineParams.sdmMode = argv[i + 1];
+		}
+		else if (arg == "--sdm_offset") {
+			if (i + 1 >= argc) {
+				std::cout << "Must supply float after --sdm_offset" << std::endl;
+				exit(EXIT_SUCCESS);
+			}
+			cmdLineParams.sdmOffset = std::stof(argv[i + 1]);
+		}
+
+		else if (arg == "--sdm_offset_fs_low") {
+			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_offset_fs_low" << std::endl; exit(EXIT_SUCCESS); }
+			cmdLineParams.sdmOffsetFsLow = std::stof(argv[i + 1]);
+		}
+		else if (arg == "--sdm_offset_fs_high") {
+			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_offset_fs_high" << std::endl; exit(EXIT_SUCCESS); }
+			cmdLineParams.sdmOffsetFsHigh = std::stof(argv[i + 1]);
+		}
+		else if (arg == "--sdm_offset_rs_low") {
+			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_offset_rs_low" << std::endl; exit(EXIT_SUCCESS); }
+			cmdLineParams.sdmOffsetRsLow = std::stof(argv[i + 1]);
+		}
+		else if (arg == "--sdm_offset_rs_high") {
+			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_offset_rs_high" << std::endl; exit(EXIT_SUCCESS); }
+			cmdLineParams.sdmOffsetRsHigh = std::stof(argv[i + 1]);
+		}
+		else if (arg == "--sdm_trigger_z_fs_low") {
+			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_trigger_z_fs_low" << std::endl; exit(EXIT_SUCCESS); }
+			cmdLineParams.sdmTriggerZFsLow = std::stof(argv[i + 1]);
+		}
+		else if (arg == "--sdm_trigger_z_fs_high") {
+			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_trigger_z_fs_high" << std::endl; exit(EXIT_SUCCESS); }
+			cmdLineParams.sdmTriggerZFsHigh = std::stof(argv[i + 1]);
+		}
+		else if (arg == "--sdm_trigger_z_rs_low") {
+			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_trigger_z_rs_low" << std::endl; exit(EXIT_SUCCESS); }
+			cmdLineParams.sdmTriggerZRsLow = std::stof(argv[i + 1]);
+		}
+		else if (arg == "--sdm_trigger_z_rs_high") {
+			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_trigger_z_rs_high" << std::endl; exit(EXIT_SUCCESS); }
+			cmdLineParams.sdmTriggerZRsHigh = std::stof(argv[i + 1]);
+		}
+		else if (arg == "--sdm_stats") {
+			if (i + 1 >= argc) {
+				std::cout << "Must supply file path after --sdm_stats" << std::endl;
+				exit(EXIT_SUCCESS);
+			}
+			cmdLineParams.sdmStatsPath = argv[i + 1];
+		}
+		else if (arg == "--sdm_rs_fs") {
+			if (i + 1 >= argc) {
+				std::cout << "Must supply file path after --sdm_rs_fs" << std::endl;
+				exit(EXIT_SUCCESS);
+			}
+			cmdLineParams.sdmRsFsPath = argv[i + 1];
+		}
 		else if (arg == "--sdm_spikes_file") {
 			if (i + 1 >= argc) {
 				std::cout << "Must supply file path after --sdm_spikes_file" << std::endl;
@@ -255,6 +321,13 @@ InputParameters parseCmdArgs(int argc, char* argv[]) {
 				exit(EXIT_SUCCESS);
 			}
 			cmdLineParams.fDriftMaxShiftUm = static_cast<float>(std::stof(argv[i + 1]));
+		}
+		else if (arg == "--drift_retrain_threshold_um") {
+			if (i + 1 >= argc) {
+				std::cout << "Must supply a shift in microns after --drift_retrain_threshold_um" << std::endl;
+				exit(EXIT_SUCCESS);
+			}
+			cmdLineParams.fDriftRetrainThresholdUm = static_cast<float>(std::stof(argv[i + 1]));
 		}
 	}
 	

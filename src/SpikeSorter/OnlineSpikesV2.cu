@@ -41,6 +41,7 @@
 #include "../NetClient/NetClient.h"
 #include "myCudnnConvolution.h"
 #include "SorterHelpers.h"
+#include "../Helpers/RetrainSignal.h"
 
 #include <atomic>
 #include <mutex>
@@ -269,6 +270,7 @@ OnlineSpikesV2::OnlineSpikesV2(
 	W(params.iMinScanWindow + params.iMaxScanWindow),
 	rootMeanSquared(0),
 	ossOutputDir(params.sOSSOutputFolder),
+	ossInputDir(params.sInputFolder),
 	spikesFileOut(),
 	recordingOffset(0),
 	substream(params.iSubstream),
@@ -677,6 +679,92 @@ void OnlineSpikesV2::loadKilosortClusteringData(std::string directoryPath)
 	}
 }
 
+// Escape a string for embedding in JSON (Windows paths carry backslashes).
+static std::string jsonEscape(const std::string& s) {
+	std::string out;
+	out.reserve(s.size() + 8);
+	for (char c : s) {
+		switch (c) {
+			case '\\': out += "\\\\"; break;
+			case '"':  out += "\\\""; break;
+			case '\n': out += "\\n";  break;
+			case '\r': out += "\\r";  break;
+			case '\t': out += "\\t";  break;
+			default:   out += c;      break;
+		}
+	}
+	return out;
+}
+
+// Drift retrain
+void OnlineSpikesV2::handleRetrainRequest(const OSSSpecificParams& osParams)
+{
+	namespace fs = std::experimental::filesystem;
+
+	std::cout << "[Retrain] Request received. Querying SpikeGLX save state..." << std::endl;
+
+	RetrainSaveInfo info;
+	bool ok = sglxSock->getSaveInfo(info, osParams);
+
+	if (!ok) {
+		std::cerr << "[Retrain] Could not read SpikeGLX save state; aborting retrain, continuing to sort." << std::endl;
+		g_retrainRequested.store(false);
+		return;
+	}
+	if (!info.saving) {
+		std::cerr << "[Retrain] SpikeGLX is not saving to disk -- nothing to retrain on. "
+		             "Enable Save in SpikeGLX and try again. Continuing to sort." << std::endl;
+		g_retrainRequested.store(false);
+		return;
+	}
+
+	t_ull fileSampleCount = (info.sampleCount >= info.fileStart)
+	                        ? (info.sampleCount - info.fileStart) : 0;
+
+	std::cout << "[Retrain] dataDir=" << info.dataDir
+	          << " runName=" << info.runName
+	          << " substream=" << osParams.substream
+	          << " fileStart=" << info.fileStart
+	          << " sampleCount=" << info.sampleCount
+	          << " fileSampleCount=" << fileSampleCount << std::endl;
+
+	if (!sglxSock->finalizeRecording())
+		std::cerr << "[Retrain] Warning: sglx_setRecordingEnable(false) failed; the file may not be finalized." << std::endl;
+
+	std::string sentinelPath = ossInputDir + "retrain_request.json";
+	std::ofstream out(sentinelPath, std::ios::trunc);
+	if (!out) {
+		std::cerr << "[Retrain] Could not open " << sentinelPath
+		          << " for writing; aborting retrain, continuing to sort." << std::endl;
+		g_retrainRequested.store(false);
+		return;
+	}
+
+	out << "{\n";
+	out << "  \"saving\": true,\n";
+	out << "  \"data_dir\": \""  << jsonEscape(info.dataDir) << "\",\n";
+	out << "  \"run_name\": \""  << jsonEscape(info.runName) << "\",\n";
+	out << "  \"substream\": "   << osParams.substream       << ",\n";
+	out << "  \"file_start\": "  << info.fileStart           << ",\n";
+	out << "  \"sample_count\": "<< info.sampleCount         << ",\n";
+	out << "  \"file_sample_count\": " << fileSampleCount     << ",\n";
+	out << "  \"sglx_params\": {";
+	bool first = true;
+	for (const auto& kv : info.params) {
+		out << (first ? "\n" : ",\n");
+		out << "    \"" << jsonEscape(kv.first) << "\": \"" << jsonEscape(kv.second) << "\"";
+		first = false;
+	}
+	out << (first ? "" : "\n") << "  }\n";
+	out << "}\n";
+	out.close();
+
+	std::cout << "[Retrain] Wrote " << sentinelPath
+	          << ". Stopping sorter for retraining." << std::endl;
+
+	std::exit(RETRAIN_EXIT_CODE);
+}
+
 void OnlineSpikesV2::runSpikeSorting()
 {
 	static const char *ptLabel = { "OnlineSpikesV2::runSpikeSorting" };
@@ -714,6 +802,11 @@ void OnlineSpikesV2::runSpikeSorting()
 
 	// Main spike sorting loop
 	while (true) {
+		// Check if retrain was requested
+		if (g_retrainRequested.load()) {
+			handleRetrainRequest(osParams);
+		}
+
 		// Wait until the minimum time window has passed before processing
 		sglxSock->waitUntil(latestCt + minWindow, osParams);
 		

@@ -59,6 +59,7 @@ tk.Button(daq_frame, text="?", command=lambda: show_hint("SGLX_PORT"), width=3).
 drift_enabled_var = tk.BooleanVar(value=False)
 drift_window_var = tk.StringVar(value="10")
 drift_max_shift_var = tk.StringVar(value="50")
+drift_retrain_threshold_var = tk.StringVar(value="50")
 
 drift_frame = tk.Frame(root, borderwidth=1, relief="groove")
 drift_frame.grid(row=1, column=4, columnspan=4, padx=5, pady=5, sticky="w")
@@ -80,6 +81,10 @@ tk.Label(drift_frame, text="Max shift (um):").grid(row=3, column=0, padx=5, pady
 tk.Entry(drift_frame, textvariable=drift_max_shift_var, width=10).grid(row=3, column=1, sticky="w")
 tk.Button(drift_frame, text="?", command=lambda: show_hint("DRIFT_MAX_SHIFT"), width=3).grid(row=3, column=3)
 
+tk.Label(drift_frame, text="Retrain threshold (um):").grid(row=4, column=0, padx=5, pady=5, sticky="w")
+tk.Entry(drift_frame, textvariable=drift_retrain_threshold_var, width=10).grid(row=4, column=1, sticky="w")
+tk.Button(drift_frame, text="?", command=lambda: show_hint("DRIFT_RETRAIN_THRESHOLD"), width=3).grid(row=4, column=3)
+
 # Notebook for sorter tabs
 toolkit = ttk.Notebook(root)
 toolkit.grid(row=2, column=0, columnspan=4, padx=5, pady=5, sticky="nsew")
@@ -91,6 +96,13 @@ rerun_ks_vars, sdm_vars = [], []
 sdm_ip_vars, sdm_port_vars = [], []
 sdm_subset_vars, sdm_trigger_z_vars, sdm_baseline_min_seconds_vars, sdm_trigger_bin_ms_vars = [], [], [], []
 sdm_processor_vars = []
+sdm_mode_vars, sdm_offset_vars, sdm_boundary_us_vars = [], [], []
+# Per-population (FS/RS)
+sdm_offset_fs_low_vars, sdm_offset_fs_high_vars = [], []
+sdm_offset_rs_low_vars, sdm_offset_rs_high_vars = [], []
+sdm_z_fs_low_vars, sdm_z_fs_high_vars = [], []
+sdm_z_rs_low_vars, sdm_z_rs_high_vars = [], []
+cl_offset_entries, cl_z_entries = {}, {}
 max_templates_vars = []
 channel_range_vars = []
 file_frames, sdm_frames = [], []
@@ -106,7 +118,30 @@ HINTS = {
     "SDM_PROCESSOR": ("How spike activity is turned into an SDM packet, and the "
                       "transport used. 'zscore' / 'logreg' send a 13-byte UDP packet "
                       "(int8 direction, float32 z, uint64 sampleCt) Use 'zscore' for the "
-                      "firing-threshold trigger loop."),
+                      "firing-threshold trigger loop. 'closedloop' splits spikes "
+                      "into FS/RS populations and sends a 16-byte packet "
+                      "(int32 FS, int32 RS, uint64 sampleCt) for the FS/RS "
+                      "early-release loop."),
+    "SDM_CLOSEDLOOP": ("Closed-loop FS/RS trigger. Pick ONE stat with its radio; only "
+                       "that stat's grid is live. Each stat has FOUR independent knobs: "
+                       "the FS and RS populations x the low ('-') and high ('+') "
+                       "direction, so FS and RS need not match and the deadband need not "
+                       "be symmetric. 'median split': a population reads low when its "
+                       "per-bin value < training median - (low offset), high when "
+                       "> median + (high offset); an offset >= 0 widens that side of the "
+                       "neutral zone, 0 = split at the median on that side. "
+                       "'z-score': fires low when z < -(neg |z|) and high when "
+                       "z > +(pos |z|), z being the per-bin value standardized by the "
+                       "training mean/sd. Leave a field blank to fall back to the legacy "
+                       "symmetric value. "
+                       "'Waveform boundary (us)' is the FS/RS trough->peak "
+                       "cutoff (200 matches AnalysisGUI). The baseline is built "
+                       "automatically each launch from Kilosort's training sort "
+                       "(spike_times/spike_templates in oss_input) -- no re-streaming. "
+                       "'Build closed-loop baseline' just rebuilds it now, e.g. after "
+                       "changing the boundary or bin size. The 'Subset' field is set "
+                       "automatically to the FS+RS neurons -- you do not type templates "
+                       "by hand in closed-loop mode."),
     "MAX_TEMPLATES": ("Limit how many preclustered templates the sorter uses "
                       "(0 = use all). Fewer templates = less GPU work in "
                       "matchingPursuit = better real-time performance on low-spec "
@@ -140,10 +175,99 @@ HINTS = {
                         "rail, not a tuning knob: if it engages, the estimate was "
                         "not trustworthy in the first place. The output GUI reports "
                         "how often it fires."),
+    "DRIFT_RETRAIN_THRESHOLD": ("Microns of estimated drift above which the output "
+                                "GUI suggests retraining templates. This only shows a "
+                                "banner -- it never retrains on its own. Press "
+                                "'Retrain templates' in the drift plot to actually "
+                                "stop sorting and re-run Kilosort4 on the data "
+                                "recorded so far, then relaunch. Distinct from Max "
+                                "shift, which clamps the estimator itself."),
 }
 
 def show_hint(key):
     messagebox.showinfo("Hint", HINTS[key])
+
+
+def run_baseline_build(oss_in, boundary="200", bin_ms="100"):
+    """Compute FS/RS labels + closed-loop baseline stats for one oss_input dir,
+    straight from Kilosort's TRAINING sort (spike_times.npy + spike_templates.npy
+    already in oss_input) -- no re-streaming through LSS, no relaunch.
+
+    Returns (ok, message). Fast (<1 s); safe to call automatically after Kilosort.
+    """
+    oss_in = Path(oss_in)
+    needed = ["templates.npy", "spike_times.npy", "spike_templates.npy"]
+    missing = [f for f in needed if not (oss_in / f).exists()]
+    if missing:
+        return False, (f"Missing {', '.join(missing)} in\n{oss_in}\n"
+                       "Run Kilosort4 (training) first.")
+    sdir = Path(__file__).parent.resolve()
+    wf = str(sdir / "waveform_classification.py")
+    bl = str(sdir / "closedloop_baseline.py")
+    labels = str(oss_in / "rs_fs_labels.csv")
+    try:
+        out1 = subprocess.run([sys.executable, wf, str(oss_in),
+                               "--boundary-us", str(boundary)],
+                              capture_output=True, text=True, check=True)
+        out2 = subprocess.run([sys.executable, bl, str(oss_in),
+                               "--labels", labels, "--bin-ms", str(bin_ms)],
+                              capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as e:
+        return False, (e.stderr or e.stdout or str(e))[-1500:]
+    return True, (out1.stdout + "\n" + out2.stdout).strip()[-1500:]
+
+
+def fs_rs_ids_from_labels(oss_in):
+    """Sorted FS∪RS template indices from oss_input/rs_fs_labels.csv (or [] if
+    absent). This IS the SDM subset for the closed-loop trigger -- only the
+    classified FS/RS neurons feed the per-bin high/low analysis."""
+    import csv as _csv
+    path = Path(oss_in) / "rs_fs_labels.csv"
+    if not path.exists():
+        return []
+    ids = []
+    with open(path, newline="") as fh:
+        for row in _csv.DictReader(fh):
+            if row.get("label", "").strip().upper() in ("FS", "RS"):
+                try:
+                    ids.append(int(row["template_index"]))
+                except (ValueError, KeyError):
+                    pass
+    return sorted(ids)
+
+
+def update_cl_mode(idx):
+    """Enable only the four threshold fields that the selected closed-loop stat
+    uses: the offset grid for 'median', the trigger-Z grid for 'zscore'. Purely
+    cosmetic -- makes it clear which knobs are live -- the run still passes both
+    sets of values."""
+    mode = sdm_mode_vars[idx].get()
+    offs = cl_offset_entries.get(idx) or []
+    zs = cl_z_entries.get(idx) or []
+    try:
+        for e in offs:
+            e.config(state=("normal" if mode == "median" else "disabled"))
+        for e in zs:
+            e.config(state=("normal" if mode == "zscore" else "disabled"))
+    except tk.TclError:
+        pass   # widget destroyed during a tab rebuild
+
+
+def build_closedloop_baseline(idx):
+    """Button handler: rebuild the baseline for sorter idx from its Kilosort
+    training sort, auto-fill the SDM subset with the FS+RS neurons, and pop up the
+    result. Use it to re-tune the waveform boundary or bin size without re-running
+    Kilosort."""
+    oss_in = Path(base_path_vars[idx].get().strip()) / "oss_input"
+    boundary = sdm_boundary_us_vars[idx].get().strip() or "200"
+    bin_ms = sdm_trigger_bin_ms_vars[idx].get().strip() or "100"
+    ok, msg = run_baseline_build(oss_in, boundary, bin_ms)
+    if ok:
+        ids = fs_rs_ids_from_labels(oss_in)
+        sdm_subset_vars[idx].set(",".join(str(x) for x in ids))
+        msg += f"\n\nSDM subset auto-set to {len(ids)} FS+RS neurons."
+    (messagebox.showinfo if ok else messagebox.showerror)(
+        "Closed-loop baseline" + ("" if ok else " failed"), msg)
 
 def browse_directory(idx):
     d = filedialog.askdirectory(initialdir=base_path_vars[idx].get() or str(Path.home()), title="Select BASE_PATH")
@@ -191,6 +315,11 @@ def update_tabs():
                     sdm_vars, sdm_ip_vars, sdm_port_vars,
                     sdm_subset_vars, sdm_trigger_z_vars, sdm_baseline_min_seconds_vars, sdm_trigger_bin_ms_vars,
                     sdm_processor_vars,
+                    sdm_mode_vars, sdm_offset_vars, sdm_boundary_us_vars,
+                    sdm_offset_fs_low_vars, sdm_offset_fs_high_vars,
+                    sdm_offset_rs_low_vars, sdm_offset_rs_high_vars,
+                    sdm_z_fs_low_vars, sdm_z_fs_high_vars,
+                    sdm_z_rs_low_vars, sdm_z_rs_high_vars,
                     max_templates_vars, channel_range_vars, file_frames, sdm_frames):
             del lst[n:]
 
@@ -210,6 +339,17 @@ def update_tabs():
         sdm_baseline_min_seconds_vars.append(tk.StringVar(value="10.0"))
         sdm_trigger_bin_ms_vars.append(tk.StringVar(value="100"))
         sdm_processor_vars.append(tk.StringVar(value="zscore"))
+        sdm_mode_vars.append(tk.StringVar(value="median"))
+        sdm_offset_vars.append(tk.StringVar(value="0"))
+        sdm_offset_fs_low_vars.append(tk.StringVar(value="0"))
+        sdm_offset_fs_high_vars.append(tk.StringVar(value="0"))
+        sdm_offset_rs_low_vars.append(tk.StringVar(value="0"))
+        sdm_offset_rs_high_vars.append(tk.StringVar(value="0"))
+        sdm_z_fs_low_vars.append(tk.StringVar(value="1.0"))
+        sdm_z_fs_high_vars.append(tk.StringVar(value="1.0"))
+        sdm_z_rs_low_vars.append(tk.StringVar(value="1.0"))
+        sdm_z_rs_high_vars.append(tk.StringVar(value="1.0"))
+        sdm_boundary_us_vars.append(tk.StringVar(value="200"))
         max_templates_vars.append(tk.StringVar(value="0"))
         channel_range_vars.append(tk.StringVar(value=""))
         file_frames.append(None)
@@ -354,12 +494,75 @@ def build_tab(frame, idx):
         row=6, column=0, padx=5, pady=5
     )
     tk.OptionMenu(sdm_frame, sdm_processor_vars[idx],
-                  "zscore", "logreg", "bincounts").grid(
+                  "zscore", "logreg", "bincounts", "closedloop").grid(
         row=6, column=1, sticky="w"
     )
     tk.Button(
         sdm_frame, text="?", command=lambda i=idx: show_hint("SDM_PROCESSOR"), width=3
     ).grid(row=6, column=2)
+
+    # --- Closed-loop trigger ---
+    tk.Label(sdm_frame, text="— Closed-loop trigger (per-population FS/RS, asymmetric) —").grid(
+        row=7, column=0, columnspan=3, pady=(8, 0), sticky="w", padx=5
+    )
+    tk.Button(
+        sdm_frame, text="?", command=lambda i=idx: show_hint("SDM_CLOSEDLOOP"), width=3
+    ).grid(row=7, column=3)
+
+    # --- median split grid ---
+    tk.Radiobutton(sdm_frame, text="median split", variable=sdm_mode_vars[idx],
+                   value="median", command=lambda i=idx: update_cl_mode(i)).grid(
+        row=8, column=0, sticky="w", padx=5
+    )
+    tk.Label(sdm_frame, text="low offset (−)").grid(row=8, column=1, sticky="w")
+    tk.Label(sdm_frame, text="high offset (+)").grid(row=8, column=2, sticky="w")
+    tk.Label(sdm_frame, text="FS:").grid(row=9, column=0, sticky="e", padx=5)
+    off_fs_low = tk.Entry(sdm_frame, textvariable=sdm_offset_fs_low_vars[idx], width=8)
+    off_fs_low.grid(row=9, column=1, sticky="w")
+    off_fs_high = tk.Entry(sdm_frame, textvariable=sdm_offset_fs_high_vars[idx], width=8)
+    off_fs_high.grid(row=9, column=2, sticky="w")
+    tk.Label(sdm_frame, text="RS:").grid(row=10, column=0, sticky="e", padx=5)
+    off_rs_low = tk.Entry(sdm_frame, textvariable=sdm_offset_rs_low_vars[idx], width=8)
+    off_rs_low.grid(row=10, column=1, sticky="w")
+    off_rs_high = tk.Entry(sdm_frame, textvariable=sdm_offset_rs_high_vars[idx], width=8)
+    off_rs_high.grid(row=10, column=2, sticky="w")
+    tk.Label(sdm_frame, text="low if pop < median − low offset, high if pop > median + high offset").grid(
+        row=11, column=0, columnspan=4, sticky="w", padx=5
+    )
+
+    # --- z-score grid ---
+    tk.Radiobutton(sdm_frame, text="z-score", variable=sdm_mode_vars[idx],
+                   value="zscore", command=lambda i=idx: update_cl_mode(i)).grid(
+        row=12, column=0, sticky="w", padx=5
+    )
+    tk.Label(sdm_frame, text="neg |z| (−)").grid(row=12, column=1, sticky="w")
+    tk.Label(sdm_frame, text="pos |z| (+)").grid(row=12, column=2, sticky="w")
+    tk.Label(sdm_frame, text="FS:").grid(row=13, column=0, sticky="e", padx=5)
+    z_fs_low = tk.Entry(sdm_frame, textvariable=sdm_z_fs_low_vars[idx], width=8)
+    z_fs_low.grid(row=13, column=1, sticky="w")
+    z_fs_high = tk.Entry(sdm_frame, textvariable=sdm_z_fs_high_vars[idx], width=8)
+    z_fs_high.grid(row=13, column=2, sticky="w")
+    tk.Label(sdm_frame, text="RS:").grid(row=14, column=0, sticky="e", padx=5)
+    z_rs_low = tk.Entry(sdm_frame, textvariable=sdm_z_rs_low_vars[idx], width=8)
+    z_rs_low.grid(row=14, column=1, sticky="w")
+    z_rs_high = tk.Entry(sdm_frame, textvariable=sdm_z_rs_high_vars[idx], width=8)
+    z_rs_high.grid(row=14, column=2, sticky="w")
+    tk.Label(sdm_frame, text="low if z < − neg, high if z > + pos").grid(
+        row=15, column=0, columnspan=4, sticky="w", padx=5
+    )
+
+    cl_offset_entries[idx] = [off_fs_low, off_fs_high, off_rs_low, off_rs_high]
+    cl_z_entries[idx] = [z_fs_low, z_fs_high, z_rs_low, z_rs_high]
+    update_cl_mode(idx)
+
+    tk.Label(sdm_frame, text="Waveform boundary (us):").grid(row=16, column=0, padx=5, pady=5)
+    tk.Entry(sdm_frame, textvariable=sdm_boundary_us_vars[idx], width=10).grid(
+        row=16, column=1, sticky="w"
+    )
+    tk.Button(
+        sdm_frame, text="Build closed-loop baseline",
+        command=lambda i=idx: build_closedloop_baseline(i)
+    ).grid(row=17, column=0, columnspan=3, padx=5, pady=5, sticky="w")
     if sdm_vars[idx].get():
         sdm_frame.grid(row=row, column=0, columnspan=4,
                        padx=5, pady=5)
@@ -437,6 +640,7 @@ def main():
             drift_enabled_var.set(state.get("drift_enabled", drift_enabled_var.get()))
             drift_window_var.set(state.get("drift_window_s", drift_window_var.get()))
             drift_max_shift_var.set(state.get("drift_max_shift_um", drift_max_shift_var.get()))
+            drift_retrain_threshold_var.set(state.get("drift_retrain_threshold_um", drift_retrain_threshold_var.get()))
         except Exception as e:
             print(f"Could not load GUI state: {e}")
 
@@ -464,6 +668,21 @@ def main():
             sdm_baseline_min_seconds_vars[i].set(state.get("sdm_baseline_min_seconds", ["10.0"] * num_sorters_var.get())[i])
             sdm_trigger_bin_ms_vars[i].set(state.get("sdm_trigger_bin_ms", ["50"] * num_sorters_var.get())[i])
             sdm_processor_vars[i].set(state.get("sdm_processors", ["zscore"] * num_sorters_var.get())[i])
+            sdm_mode_vars[i].set(state.get("sdm_modes", ["median"] * num_sorters_var.get())[i])
+            sdm_offset_vars[i].set(state.get("sdm_offsets", ["0"] * num_sorters_var.get())[i])
+            n_now = num_sorters_var.get()
+            legacy_off = state.get("sdm_offsets", ["0"] * n_now)[i]
+            legacy_z = state.get("sdm_trigger_zs", ["1.0"] * n_now)[i]
+            sdm_offset_fs_low_vars[i].set(state.get("sdm_offset_fs_low", [legacy_off] * n_now)[i])
+            sdm_offset_fs_high_vars[i].set(state.get("sdm_offset_fs_high", [legacy_off] * n_now)[i])
+            sdm_offset_rs_low_vars[i].set(state.get("sdm_offset_rs_low", [legacy_off] * n_now)[i])
+            sdm_offset_rs_high_vars[i].set(state.get("sdm_offset_rs_high", [legacy_off] * n_now)[i])
+            sdm_z_fs_low_vars[i].set(state.get("sdm_z_fs_low", [legacy_z] * n_now)[i])
+            sdm_z_fs_high_vars[i].set(state.get("sdm_z_fs_high", [legacy_z] * n_now)[i])
+            sdm_z_rs_low_vars[i].set(state.get("sdm_z_rs_low", [legacy_z] * n_now)[i])
+            sdm_z_rs_high_vars[i].set(state.get("sdm_z_rs_high", [legacy_z] * n_now)[i])
+            sdm_boundary_us_vars[i].set(state.get("sdm_boundary_us", ["200"] * num_sorters_var.get())[i])
+            update_cl_mode(i)   # refresh which trigger field is live for the loaded stat
             max_templates_vars[i].set(state.get("max_templates", ["0"] * num_sorters_var.get())[i])
             channel_range_vars[i].set(state.get("channel_ranges", [""] * num_sorters_var.get())[i])
 
@@ -490,6 +709,17 @@ def run_online_multi():
     SDM_BASELINE_MIN_SECONDS = [v.get().strip() for v in sdm_baseline_min_seconds_vars]
     SDM_TRIGGER_BIN_MS = [v.get().strip() for v in sdm_trigger_bin_ms_vars]
     SDM_PROCESSORS = [v.get().strip() for v in sdm_processor_vars]
+    SDM_MODES = [v.get().strip() for v in sdm_mode_vars]
+    SDM_OFFSETS = [v.get().strip() for v in sdm_offset_vars]
+    SDM_OFFSET_FS_LOW = [v.get().strip() for v in sdm_offset_fs_low_vars]
+    SDM_OFFSET_FS_HIGH = [v.get().strip() for v in sdm_offset_fs_high_vars]
+    SDM_OFFSET_RS_LOW = [v.get().strip() for v in sdm_offset_rs_low_vars]
+    SDM_OFFSET_RS_HIGH = [v.get().strip() for v in sdm_offset_rs_high_vars]
+    SDM_Z_FS_LOW = [v.get().strip() for v in sdm_z_fs_low_vars]
+    SDM_Z_FS_HIGH = [v.get().strip() for v in sdm_z_fs_high_vars]
+    SDM_Z_RS_LOW = [v.get().strip() for v in sdm_z_rs_low_vars]
+    SDM_Z_RS_HIGH = [v.get().strip() for v in sdm_z_rs_high_vars]
+    SDM_BOUNDARY_US = [v.get().strip() for v in sdm_boundary_us_vars]
     MAX_TEMPLATES = [v.get().strip() for v in max_templates_vars]
     CHANNEL_RANGES = [v.get().strip() for v in channel_range_vars]
     SGLX_HOST = sglx_host_var.get().strip()
@@ -497,6 +727,7 @@ def run_online_multi():
     DRIFT_ENABLED = drift_enabled_var.get()
     DRIFT_WINDOW_S = drift_window_var.get().strip()
     DRIFT_MAX_SHIFT_UM = drift_max_shift_var.get().strip()
+    DRIFT_RETRAIN_THRESHOLD_UM = drift_retrain_threshold_var.get().strip()
 
     # Save current state
     state = {
@@ -506,6 +737,7 @@ def run_online_multi():
         "drift_enabled": DRIFT_ENABLED,
         "drift_window_s": DRIFT_WINDOW_S,
         "drift_max_shift_um": DRIFT_MAX_SHIFT_UM,
+        "drift_retrain_threshold_um": DRIFT_RETRAIN_THRESHOLD_UM,
         "base_paths": [str(p) for p in BASE_PATHS],
         "ks_output_dirs": [str(d) for d in KS_OUTPUT_DIRS],
         "bin_files": [str(p) for p in BIN_FILES],
@@ -520,6 +752,17 @@ def run_online_multi():
         "sdm_baseline_min_seconds": SDM_BASELINE_MIN_SECONDS,
         "sdm_trigger_bin_ms": SDM_TRIGGER_BIN_MS,
         "sdm_processors": SDM_PROCESSORS,
+        "sdm_modes": SDM_MODES,
+        "sdm_offsets": SDM_OFFSETS,
+        "sdm_offset_fs_low": SDM_OFFSET_FS_LOW,
+        "sdm_offset_fs_high": SDM_OFFSET_FS_HIGH,
+        "sdm_offset_rs_low": SDM_OFFSET_RS_LOW,
+        "sdm_offset_rs_high": SDM_OFFSET_RS_HIGH,
+        "sdm_z_fs_low": SDM_Z_FS_LOW,
+        "sdm_z_fs_high": SDM_Z_FS_HIGH,
+        "sdm_z_rs_low": SDM_Z_RS_LOW,
+        "sdm_z_rs_high": SDM_Z_RS_HIGH,
+        "sdm_boundary_us": SDM_BOUNDARY_US,
         "max_templates": MAX_TEMPLATES,
         "channel_ranges": CHANNEL_RANGES
     }
@@ -533,6 +776,14 @@ def run_online_multi():
     OSS_DIRS = curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
                                      META_FILES, CHANMAP_FILES, RERUN_FLAGS,
                                      MAX_TEMPLATES, CHANNEL_RANGES)
+
+    for i, proc in enumerate(SDM_PROCESSORS):
+        if SDM_FLAGS[i] and proc == 'closedloop':
+            ok, msg = run_baseline_build(
+                OSS_DIRS[i], SDM_BOUNDARY_US[i] or "200",
+                SDM_TRIGGER_BIN_MS[i] or "100")
+            tag = "[closed-loop baseline]" if ok else "[closed-loop baseline] FAILED"
+            print(f"{tag} sorter {i+1}:\n{msg}")
 
     # Build and run C++ command
     decoder_input_dirs = [bp / 'decoder_input' for bp in BASE_PATHS]
@@ -572,11 +823,37 @@ def run_online_multi():
         if SDM_TRIGGER_BIN_MS[sdm_idx]:
             arguments['--sdm_trigger_bin_ms'] = SDM_TRIGGER_BIN_MS[sdm_idx]
 
+        if SDM_PROCESSORS[sdm_idx] == 'closedloop':
+            oss_dir = OSS_DIRS[sdm_idx]  # already has a trailing backslash
+            arguments['--sdm_mode'] = SDM_MODES[sdm_idx] or 'median'
+            arguments['--sdm_offset'] = SDM_OFFSETS[sdm_idx] or '0'
+
+            for flag, vals in (
+                ('--sdm_offset_fs_low',  SDM_OFFSET_FS_LOW),
+                ('--sdm_offset_fs_high', SDM_OFFSET_FS_HIGH),
+                ('--sdm_offset_rs_low',  SDM_OFFSET_RS_LOW),
+                ('--sdm_offset_rs_high', SDM_OFFSET_RS_HIGH),
+                ('--sdm_trigger_z_fs_low',  SDM_Z_FS_LOW),
+                ('--sdm_trigger_z_fs_high', SDM_Z_FS_HIGH),
+                ('--sdm_trigger_z_rs_low',  SDM_Z_RS_LOW),
+                ('--sdm_trigger_z_rs_high', SDM_Z_RS_HIGH),
+            ):
+                if vals[sdm_idx]:
+                    arguments[flag] = vals[sdm_idx]
+            arguments['--sdm_rs_fs'] = oss_dir + 'rs_fs_labels.csv'
+            arguments['--sdm_stats'] = oss_dir + 'closedloop_stats.txt'
+            # Subset is the FS+RS neurons from the baseline, not the manual field.
+            fs_rs_ids = fs_rs_ids_from_labels(oss_dir)
+            if fs_rs_ids:
+                arguments['--sdm_subset'] = ",".join(str(x) for x in fs_rs_ids)
+
     if DRIFT_ENABLED:
         if DRIFT_WINDOW_S:
             arguments['--drift_window_s'] = DRIFT_WINDOW_S
         if DRIFT_MAX_SHIFT_UM:
             arguments['--drift_max_shift_um'] = DRIFT_MAX_SHIFT_UM
+        if DRIFT_RETRAIN_THRESHOLD_UM:
+            arguments['--drift_retrain_threshold_um'] = DRIFT_RETRAIN_THRESHOLD_UM
 
     script_dir = pathlib.Path(__file__).parent.resolve()
     # Go back exactly two levels to reach the project root and build path to executable 
@@ -593,9 +870,73 @@ def run_online_multi():
     if DRIFT_ENABLED:
         cmd.append('--drift_estimation')
 
-    print("Running LSS with:", shlex.join(cmd))
-    proc = subprocess.Popen(cmd, shell=True)
-    proc.wait()
+    # RETRAIN loop
+    while True:
+        print("Running LSS with:", shlex.join(cmd))
+        proc = subprocess.Popen(cmd, shell=True)
+        rc = proc.wait()
+
+        retrain_sources = {}   # sorter index -> (bin_path, meta_path)
+        for i, oss in enumerate(OSS_DIRS):
+            sentinel = Path(oss.rstrip('\\/')) / 'retrain_request.json'
+            if not sentinel.exists():
+                continue
+            try:
+                info = json.loads(sentinel.read_text())
+                bin_path, meta_path = resolve_retrain_recording(info)
+            except Exception as e:
+                print(f"[Retrain] Could not resolve saved recording for sorter "
+                      f"{i+1}: {e}. Skipping retrain for this sorter.")
+                sentinel.unlink(missing_ok=True)
+                continue
+            retrain_sources[i] = (bin_path, meta_path)
+            sentinel.unlink(missing_ok=True)
+
+        if not retrain_sources:
+            # Normal exit (user quit, or an error). rc==RETRAIN_EXIT_CODE(42)
+            # without a resolvable sentinel means the recording couldn't be
+            # found -- already reported above; nothing more to do.
+            break
+
+        print(f"[Retrain] Re-running Kilosort4 for sorter(s) "
+              f"{[i+1 for i in retrain_sources]} on the data recorded so far. "
+              f"Sorting is stopped until this finishes.")
+        rerun = [(i in retrain_sources) for i in range(len(BASE_PATHS))]
+        OSS_DIRS = curate_oss_input_dir(
+            BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES, META_FILES, CHANMAP_FILES,
+            rerun, MAX_TEMPLATES, CHANNEL_RANGES, retrain_sources=retrain_sources)
+        print("[Retrain] Templates rebuilt. Relaunching sorter...")
+
+
+def resolve_retrain_recording(info):
+    """Given a parsed retrain_request.json, return (bin_path, meta_path) for the
+    SpikeGLX file the sorter just finalized.
+
+    The sorter records SpikeGLX's data dir, run name and probe substream, but
+    the exact gate/trigger indices are awkward to reconstruct reliably. Instead
+    we glob the data dir for this probe's AP files and pick the most recently
+    modified one -- that is the file finalized when the button was pressed.
+    """
+    data_dir = info.get("data_dir", "")
+    substream = int(info.get("substream", 0))
+    if not data_dir or not Path(data_dir).is_dir():
+        raise FileNotFoundError(f"SpikeGLX data_dir not found: {data_dir!r}")
+
+    pattern = f"*.imec{substream}.ap.bin"
+    candidates = list(Path(data_dir).rglob(pattern))
+    if not candidates:
+        raise FileNotFoundError(
+            f"No {pattern} under {data_dir} (is SpikeGLX Save enabled?)")
+
+    bin_path = max(candidates, key=lambda p: p.stat().st_mtime)
+    meta_path = bin_path.with_suffix(".meta")
+    if not meta_path.exists():
+        raise FileNotFoundError(f"Missing meta beside {bin_path.name}: {meta_path}")
+
+    print(f"[Retrain] Using recording {bin_path} "
+          f"(run_name={info.get('run_name')!r}, "
+          f"file_sample_count={info.get('file_sample_count')}).")
+    return str(bin_path), str(meta_path)
 
 
 def cluster_centroids_pca_compute(templates, Wall, pc_feature_ind):
@@ -781,15 +1122,13 @@ def snapshot_drift_stage(ops, st0, device=None):
 
 def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
                          META_FILES, CHANMAP_FILES, RERUN_FLAGS,
-                         MAX_TEMPLATES=None, CHANNEL_RANGES=None):
+                         MAX_TEMPLATES=None, CHANNEL_RANGES=None,
+                         retrain_sources=None):
+    retrain_sources = retrain_sources or {}
     OSS_DIRS = []
     for i, base in enumerate(BASE_PATHS):
         ks_out = KS_OUTPUT_DIRS[i]
         oss_in = base / 'oss_input'
-
-        # Reuse an already-curated oss_input/ when not retraining, so repeat
-        # launches don't require torch/kilosort/qtpy/matplotlib installed at
-        # all. Max templates/Channel range only take effect when Rerun
         # Kilosort4 is checked, or on the very first curate for this sorter.
         if not RERUN_FLAGS[i] and (oss_in / 'templates.npy').exists():
             print(f"Reusing existing oss_input for sorter {i+1} "
@@ -802,10 +1141,6 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
             from kilosort.preprocessing import get_drift_matrix
             from kilosort.template_matching import prepare_extract
         except ImportError as e:
-            # Note: the Tk root is already destroyed by this point (finish_and_quit
-            # runs before run_online_multi reaches curate_oss_input_dir), so a
-            # messagebox popup isn't reliable here -- print + exit, matching the
-            # other post-GUI error paths in this function (below).
             print("Error: curating oss_input/ requires the Kilosort4 training "
                   "dependencies (torch, kilosort, ...).\n"
                   "Install them with:\n"
@@ -817,20 +1152,25 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
             if not torch.cuda.is_available():
                 print(f"Error: No GPU for sorter {i+1}")
                 sys.exit(1)
-            print(f"Starting kilosort for sorter {i+1}...")
-            meta = parse_bin_meta_file(META_FILES[i])
+            if i in retrain_sources:
+                bin_path, meta_path = retrain_sources[i]
+                data_dir = str(Path(bin_path).parent)
+                print(f"[Retrain] Starting kilosort for sorter {i+1} on {bin_path}...")
+            else:
+                bin_path = BIN_FILES[i]
+                meta_path = META_FILES[i]
+                data_dir = str(base / 'imec_raw')
+                print(f"Starting kilosort for sorter {i+1}...")
+            meta = parse_bin_meta_file(meta_path)
             start = time.time()
-            settings = {'data_dir': str(base / 'imec_raw'), 'n_chan_bin': meta['nSavedChans']}
+            settings = {'data_dir': data_dir, 'n_chan_bin': meta['nSavedChans']}
             drift_snapshot = run_kilosort_with_drift_plots(
                 settings=settings,
                 probe_name=CHANMAP_FILES[i],
                 results_dir=str(ks_out),
-                filename=BIN_FILES[i])
+                filename=bin_path)
             print(f"Kilosort sorter {i+1} took {time.time() - start:.2f} s")
         else:
-            # The universal-template detector can only be captured while
-            # Kilosort is running (see snapshot_drift_stage). Without it the
-            # live drift estimator has nothing to detect with.
             drift_snapshot = None
 
         print(f"Loading kilosort output sorter {i+1} from {ks_out}")

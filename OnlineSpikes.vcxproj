@@ -166,6 +166,7 @@ copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll
     <ClCompile Include="src\Decoder\Decoder.cpp" />
     <ClCompile Include="src\Decoder\SdmProcessor.cpp" />
     <ClCompile Include="src\Decoder\ZScoreSdmProcessor.cpp" />
+    <ClCompile Include="src\Decoder\ClosedLoopSdmProcessor.cpp" />
     <ClCompile Include="src\Decoder\LogRegSdmProcessor.cpp" />
     <ClCompile Include="src\Decoder\BinCountSdmProcessor.cpp" />
     <ClCompile Include="src\Helpers\FileWriter.cpp" />
@@ -220,6 +221,7 @@ copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll
     <ClInclude Include="src\Decoder\Decoder.h" />
     <ClInclude Include="src\Decoder\SdmProcessor.h" />
     <ClInclude Include="src\Decoder\ZScoreSdmProcessor.h" />
+    <ClInclude Include="src\Decoder\ClosedLoopSdmProcessor.h" />
     <ClInclude Include="src\Decoder\LogRegSdmProcessor.h" />
     <ClInclude Include="src\Decoder\BinCountSdmProcessor.h" />
     <ClInclude Include="src\Helpers\FileWriter.h" />

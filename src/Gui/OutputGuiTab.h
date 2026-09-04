@@ -73,7 +73,7 @@ class OutputGuiTab {
 
 public:
 	//constructor and destructor
-	OutputGuiTab(std::string tabName, std::string ossInputDir = "");
+	OutputGuiTab(std::string tabName, std::string ossInputDir = "", float retrainThresholdUm = 0.0f);
 	~OutputGuiTab();
 
 	//functions
@@ -172,6 +172,9 @@ private:
 	bool                m_bDriftRefLoaded = false;
 	float               m_fKsTrainSec     = 0.0f;  // training duration, seconds
 	bool                m_bDriftFollow    = true;  // auto-scroll x to the live trace
+
+	// Drift retrain threshold
+	float               m_fRetrainThresholdUm = 0.0f;
 };
 
 

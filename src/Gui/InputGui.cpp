@@ -62,6 +62,10 @@ InputGUI::InputGUI(InputParameters cmdLineParams)
 	Params.sdmBaselineMinSeconds = cmdLineParams.sdmBaselineMinSeconds;
 	Params.sdmTriggerBinMs = cmdLineParams.sdmTriggerBinMs;
 	Params.sdmProcessorType = cmdLineParams.sdmProcessorType;
+	Params.sdmMode = cmdLineParams.sdmMode;
+	Params.sdmOffset = cmdLineParams.sdmOffset;
+	Params.sdmStatsPath = cmdLineParams.sdmStatsPath;
+	Params.sdmRsFsPath = cmdLineParams.sdmRsFsPath;
 	Params.sSdmSpikesFile = cmdLineParams.sSdmSpikesFile;
 	Params.sSdmEventFile = cmdLineParams.sSdmEventFile;
 	Params.sSdmDecoderWorkFolder = cmdLineParams.sSdmDecoderWorkFolder;
@@ -97,6 +101,7 @@ InputGUI::InputGUI(InputParameters cmdLineParams)
 	Params.bDriftEstimation = cmdLineParams.bDriftEstimation;
 	Params.fDriftWindowSeconds = cmdLineParams.fDriftWindowSeconds;
 	Params.fDriftMaxShiftUm = cmdLineParams.fDriftMaxShiftUm;
+	Params.fDriftRetrainThresholdUm = cmdLineParams.fDriftRetrainThresholdUm;
 
 	// TODO: remove the marked entries from InputParameters and remove any dependencies on them
 	/* -------- fixed defaults -------- */

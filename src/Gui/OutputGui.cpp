@@ -8,7 +8,8 @@ OutputGui::OutputGui(InputParameters cmdLineParams)
 		std::stringstream ss;
 		ss << "Tab: " << itr->second;
 		// itr->second is this device's oss_input/ used for drift trace
-		tabs.push_back(new OutputGuiTab(ss.str(), itr->second));
+		tabs.push_back(new OutputGuiTab(ss.str(), itr->second,
+			cmdLineParams.fDriftRetrainThresholdUm));
 	}
 }
 

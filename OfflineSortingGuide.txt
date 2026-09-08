@@ -95,7 +95,7 @@ SpikeGLX is an external dependency, downloaded separately
     e.g. App/Release_v20251218-api4.zip
   - The extracted files contain two executables: SpikeGLX_STD.exe (needs NI-DAQmx 
     drivers) and SpikeGLX_STD_NISIM.exe (no NI dependency). For offline replay 
-    with no NI hardware, you want SpikeGLX_STD_NISIM.exe
+    with no NI hardware, you can use SpikeGLX_STD_NISIM.exe
 
 
 
@@ -106,19 +106,13 @@ Install Python 3.10 from python.org. Our dependencies do not currently support n
   - At install time, leave "Add Python to PATH" checked.
 
 
-Then create a virtual environment:
+Then create a virtual environment and install the dependencies. run these from the repo root
+you cloned in A4:
+
   py -3.10 -m venv venv
+
   venv\Scripts\activate
-
-
-Install the Python packages LSS uses:
-
-
-  pip install kilosort==4.0.13
-  pip install torch==1.12.0+cu113 -f https://download.pytorch.org/whl/torch_stable.html
-  pip install "numpy<2" scipy scikit-learn matplotlib h5py
-  pip install spikeinterface probeinterface
-  pip install pyqtgraph PyQt5
+  pip install -r requirements.txt
 
 
 
@@ -183,7 +177,7 @@ LSS does not learn templates online. You must run Kilosort4 on the recording
 first to produce templates, the whitening matrix, drift matrices, etc.
 
 
-(Ensure your environment is activated venv\Scripts\activate)
+(Ensure your environment is activated)
 
 
   cd <repo>\src\Python
@@ -287,7 +281,7 @@ Ensure your IP Address and Port are matching
   py -3.10 run_online_spikes.py
 
 
-LSS GUI launches automatically after Kilosort completes
+LSS launches automatically after Kilosort completes
 
 
 

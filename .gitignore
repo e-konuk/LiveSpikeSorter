@@ -293,3 +293,9 @@ methods_section_draft.txt
 
 # Claude Code
 .claude/
+
+# Vendored Kilosort fork
+/External/Kilosort/build/
+/External/Kilosort/kilosort.egg-info/
+# Keep package data assets the global *.npz / *.npy rules would drop
+!/External/Kilosort/kilosort/wTEMP.npz

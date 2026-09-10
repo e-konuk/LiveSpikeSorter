@@ -14,7 +14,7 @@ Live Spike Sorter (LSS) is a GPU-accelerated real-time spike sorter for extracel
 | :---- | :---- |
 | **NVIDIA GPU** | Compute capability 7.5 or higher |
 | **CUDA** | 11.8 |
-| **cuDNN** | Compatible with CUDA 11.8 ([install guide](https://docs.nvidia.com/deeplearning/cudnn/install-guide/index.html)) |
+| **cuDNN** | Compatible with CUDA 11.8 ([install guide](https://developer.nvidia.com/rdp/cudnn-archive)) |
 | **Visual Studio** | 2022 Build Tools with the **v143** platform toolset |
 | **Windows 10 SDK** | 10.0.17763.0 |
 | **Python** | 3.10 |

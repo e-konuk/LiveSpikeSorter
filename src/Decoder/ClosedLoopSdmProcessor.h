@@ -8,7 +8,7 @@
 
 // Closed-loop SDM processor: splits spikes into FS and RS populations 
 //
-// Two statistic modes:
+// Two statistic modes (sdm_param "mode"; keys declared in src/Python/sdm_processors.py):
 // (low/high), so FS and RS need not share a value and the deadband need not be symmetric:
 //   "median" : state = -1 (low)  if V_P(bin) < median_P - offLow_P
 //                      +1 (high) if V_P(bin) > median_P + offHigh_P, else 0.

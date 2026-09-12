@@ -21,8 +21,9 @@ ZScoreSdmProcessor::~ZScoreSdmProcessor() = default;
 void ZScoreSdmProcessor::init(const InputParameters& params,
                               const std::vector<long>& /*activitySubset*/)
 {
-	m_triggerZ = params.sdmTriggerZ;
-	m_baselineMinSeconds = params.sdmBaselineMinSeconds;
+	SdmParams p(params.mapSdmParams);
+	m_triggerZ = p.getFloat("trigger_z", 1.0f);
+	m_baselineMinSeconds = p.getFloat("baseline_min_seconds", 10.0f);
 	m_samplingRateHz = params.fImecSamplingRate;
 	m_binMs = params.sdmTriggerBinMs;
 	m_binSamples = std::max<long>(1, static_cast<long>(std::llround(
@@ -160,3 +161,5 @@ float ZScoreSdmProcessor::computeBinValue(long binEndSampleCt, int8_t& direction
 
 	return static_cast<float>(zVal);
 }
+
+REGISTER_SDM_PROCESSOR("zscore", ZScoreSdmProcessor);

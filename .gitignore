@@ -278,7 +278,8 @@ Python/
 !src/Python/run_online_spikes.py
 
 # The Python environment spec is source, despite the global *.txt rule above.
-!requirements.txt
+# Root-anchored: there is exactly one, at the repo root.
+!/requirements.txt
 
 # The vendored Kilosort fork (External/Kilosort) is source, not build output.
 # Keep its bundled template file despite the global *.npz rule above.

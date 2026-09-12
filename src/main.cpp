@@ -12,14 +12,13 @@
 
 #include "SpikeSorter/dataSocket.h" // for decoder to access getStreamSampleCt()
 
-#include "Helpers/RetrainSignal.h"
+#include "Helpers/RetrainSignal.h" //drift retrain
 
 #include <npp.h> // to get the number of GPU devices
-
-
 std::atomic<bool> g_retrainRequested{ false };
 
 #include <algorithm>
+#include <map>
 #include <sstream>
 
 //Check if we are not in the .exe folder. A bit ugly, but it works
@@ -110,6 +109,22 @@ void runDecoder(Sock &mainServer, std::vector<sockaddr_in> sorterImecAddrs, std:
 	Decoder decoder(sorterImecAddrs, sorterNidqAddrs, guiAddr, params, mNC);
 }
 
+static const char* legacySdmParamKey(const std::string& flag) {
+	static const std::map<std::string, const char*> table = {
+		{ "--sdm_trigger_z", "trigger_z" },           { "--sdm_baseline_min_seconds", "baseline_min_seconds" },
+		{ "--sdm_mode", "mode" },                     { "--sdm_offset", "offset" },
+		{ "--sdm_offset_fs_low", "fs_offset_low" },   { "--sdm_offset_fs_high", "fs_offset_high" },
+		{ "--sdm_offset_rs_low", "rs_offset_low" },   { "--sdm_offset_rs_high", "rs_offset_high" },
+		{ "--sdm_trigger_z_fs_low", "fs_z_low" },     { "--sdm_trigger_z_fs_high", "fs_z_high" },
+		{ "--sdm_trigger_z_rs_low", "rs_z_low" },     { "--sdm_trigger_z_rs_high", "rs_z_high" },
+		{ "--sdm_stats", "stats_path" },              { "--sdm_rs_fs", "rs_fs_path" },
+		{ "--sdm_spikes_file", "spikes_file" },       { "--sdm_event_file", "event_file" },
+		{ "--sdm_decoder_work_folder", "work_folder" }, { "--sdm_decoder_window_ms", "window_ms" },
+	};
+	auto it = table.find(flag);
+	return it == table.end() ? nullptr : it->second;
+}
+
 InputParameters parseCmdArgs(int argc, char* argv[]) {
 	InputParameters cmdLineParams;
 
@@ -170,20 +185,6 @@ InputParameters parseCmdArgs(int argc, char* argv[]) {
 				cmdLineParams.vSdmActivitySubset.push_back(std::stol(item));
 			}
 		}
-		else if (arg == "--sdm_trigger_z") {
-			if (i + 1 >= argc) {
-				std::cout << "Must supply float after --sdm_trigger_z" << std::endl;
-				exit(EXIT_SUCCESS);
-			}
-			cmdLineParams.sdmTriggerZ = std::stof(argv[i + 1]);
-		}
-		else if (arg == "--sdm_baseline_min_seconds") {
-			if (i + 1 >= argc) {
-				std::cout << "Must supply float after --sdm_baseline_min_seconds" << std::endl;
-				exit(EXIT_SUCCESS);
-			}
-			cmdLineParams.sdmBaselineMinSeconds = std::stof(argv[i + 1]);
-		}
 		else if (arg == "--sdm_trigger_bin_ms") {
 			if (i + 1 >= argc) {
 				std::cout << "Must supply int after --sdm_trigger_bin_ms" << std::endl;
@@ -193,100 +194,31 @@ InputParameters parseCmdArgs(int argc, char* argv[]) {
 		}
 		else if (arg == "--sdm_processor") {
 			if (i + 1 >= argc) {
-				std::cout << "Must supply type (zscore|logreg|bincounts) after --sdm_processor" << std::endl;
+				std::cout << "Must supply a processor name (e.g. zscore) after --sdm_processor" << std::endl;
 				exit(EXIT_SUCCESS);
 			}
 			cmdLineParams.sdmProcessorType = argv[i + 1];
 			std::cout << "SDM processor type: " << cmdLineParams.sdmProcessorType << std::endl;
 		}
-		else if (arg == "--sdm_mode") {
+		else if (arg == "--sdm_param") {
+			int j = i + 1;
+			for (; j < argc && std::string(argv[j]).rfind("--", 0) != 0; ++j) {
+				const std::string kv = argv[j];
+				const size_t eq = kv.find('=');
+				if (eq == std::string::npos || eq == 0) {
+					std::cout << "Ignoring malformed --sdm_param '" << kv << "' (expected key=value)" << std::endl;
+					continue;
+				}
+				cmdLineParams.mapSdmParams[kv.substr(0, eq)] = kv.substr(eq + 1);
+			}
+			i = j - 1;
+		}
+		else if (legacySdmParamKey(arg) != nullptr) {
 			if (i + 1 >= argc) {
-				std::cout << "Must supply mode (median|zscore) after --sdm_mode" << std::endl;
+				std::cout << "Must supply a value after " << arg << std::endl;
 				exit(EXIT_SUCCESS);
 			}
-			cmdLineParams.sdmMode = argv[i + 1];
-		}
-		else if (arg == "--sdm_offset") {
-			if (i + 1 >= argc) {
-				std::cout << "Must supply float after --sdm_offset" << std::endl;
-				exit(EXIT_SUCCESS);
-			}
-			cmdLineParams.sdmOffset = std::stof(argv[i + 1]);
-		}
-
-		else if (arg == "--sdm_offset_fs_low") {
-			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_offset_fs_low" << std::endl; exit(EXIT_SUCCESS); }
-			cmdLineParams.sdmOffsetFsLow = std::stof(argv[i + 1]);
-		}
-		else if (arg == "--sdm_offset_fs_high") {
-			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_offset_fs_high" << std::endl; exit(EXIT_SUCCESS); }
-			cmdLineParams.sdmOffsetFsHigh = std::stof(argv[i + 1]);
-		}
-		else if (arg == "--sdm_offset_rs_low") {
-			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_offset_rs_low" << std::endl; exit(EXIT_SUCCESS); }
-			cmdLineParams.sdmOffsetRsLow = std::stof(argv[i + 1]);
-		}
-		else if (arg == "--sdm_offset_rs_high") {
-			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_offset_rs_high" << std::endl; exit(EXIT_SUCCESS); }
-			cmdLineParams.sdmOffsetRsHigh = std::stof(argv[i + 1]);
-		}
-		else if (arg == "--sdm_trigger_z_fs_low") {
-			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_trigger_z_fs_low" << std::endl; exit(EXIT_SUCCESS); }
-			cmdLineParams.sdmTriggerZFsLow = std::stof(argv[i + 1]);
-		}
-		else if (arg == "--sdm_trigger_z_fs_high") {
-			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_trigger_z_fs_high" << std::endl; exit(EXIT_SUCCESS); }
-			cmdLineParams.sdmTriggerZFsHigh = std::stof(argv[i + 1]);
-		}
-		else if (arg == "--sdm_trigger_z_rs_low") {
-			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_trigger_z_rs_low" << std::endl; exit(EXIT_SUCCESS); }
-			cmdLineParams.sdmTriggerZRsLow = std::stof(argv[i + 1]);
-		}
-		else if (arg == "--sdm_trigger_z_rs_high") {
-			if (i + 1 >= argc) { std::cout << "Must supply float after --sdm_trigger_z_rs_high" << std::endl; exit(EXIT_SUCCESS); }
-			cmdLineParams.sdmTriggerZRsHigh = std::stof(argv[i + 1]);
-		}
-		else if (arg == "--sdm_stats") {
-			if (i + 1 >= argc) {
-				std::cout << "Must supply file path after --sdm_stats" << std::endl;
-				exit(EXIT_SUCCESS);
-			}
-			cmdLineParams.sdmStatsPath = argv[i + 1];
-		}
-		else if (arg == "--sdm_rs_fs") {
-			if (i + 1 >= argc) {
-				std::cout << "Must supply file path after --sdm_rs_fs" << std::endl;
-				exit(EXIT_SUCCESS);
-			}
-			cmdLineParams.sdmRsFsPath = argv[i + 1];
-		}
-		else if (arg == "--sdm_spikes_file") {
-			if (i + 1 >= argc) {
-				std::cout << "Must supply file path after --sdm_spikes_file" << std::endl;
-				exit(EXIT_SUCCESS);
-			}
-			cmdLineParams.sSdmSpikesFile = argv[i + 1];
-		}
-		else if (arg == "--sdm_event_file") {
-			if (i + 1 >= argc) {
-				std::cout << "Must supply file path after --sdm_event_file" << std::endl;
-				exit(EXIT_SUCCESS);
-			}
-			cmdLineParams.sSdmEventFile = argv[i + 1];
-		}
-		else if (arg == "--sdm_decoder_work_folder") {
-			if (i + 1 >= argc) {
-				std::cout << "Must supply folder path after --sdm_decoder_work_folder" << std::endl;
-				exit(EXIT_SUCCESS);
-			}
-			cmdLineParams.sSdmDecoderWorkFolder = argv[i + 1];
-		}
-		else if (arg == "--sdm_decoder_window_ms") {
-			if (i + 1 >= argc) {
-				std::cout << "Must supply int after --sdm_decoder_window_ms" << std::endl;
-				exit(EXIT_SUCCESS);
-			}
-			cmdLineParams.sdmDecoderWindowMs = std::stoi(argv[i + 1]);
+			cmdLineParams.mapSdmParams[legacySdmParamKey(arg)] = argv[i + 1];
 		}
 		else if (arg == "--sglx_host") {
 			if (i + 1 >= argc) {
@@ -301,6 +233,13 @@ InputParameters parseCmdArgs(int argc, char* argv[]) {
 				exit(EXIT_SUCCESS);
 			}
 			cmdLineParams.uDataAccquisitionPort = static_cast<uint16>(std::stoi(argv[i + 1]));
+		}
+		else if (arg == "--spike_stream") {
+			if (i + 1 >= argc) {
+				std::cout << "Must supply host:port after --spike_stream" << std::endl;
+				exit(EXIT_SUCCESS);
+			}
+			cmdLineParams.sSpikeStreamAddr = argv[i + 1];
 		}
 		else if (arg == "--no_input_gui") {
 			cmdLineParams.bSkipInputGui = true;

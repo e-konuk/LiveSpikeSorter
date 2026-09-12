@@ -280,6 +280,7 @@ OnlineSpikesV2::OnlineSpikesV2(
 
 	initializeSorter(params);
 	establishDecoderConnection(mainAddr);
+	spikeStream.open(params.sSpikeStreamAddr, params.uSelectedDevice);
 }
 
 OnlineSpikesV2::~OnlineSpikesV2()
@@ -943,7 +944,9 @@ void OnlineSpikesV2::runSpikeSorting()
 		}
 
 		// Save the spikes into times, templates, amplitudes
-		saveSpikes(numSpikes, latestCt - currBatchNumSamples + 1, currBatchNumSamples - minWindow, times, templates, amplitudes);
+		const long batchStartCt = latestCt - currBatchNumSamples + 1;
+		const long batchValidLen = currBatchNumSamples - minWindow; // spikes past this are deferred to the next batch
+		saveSpikes(numSpikes, batchStartCt, batchValidLen, times, templates, amplitudes);
 
 		clock_gettime(batchAfter);
 		long processTime = GetTimeDiff(batchAfter, batchBefore);
@@ -967,6 +970,16 @@ void OnlineSpikesV2::runSpikeSorting()
 		}
 
 		sendPayload(&imecFm, payload, decoderImecAddr);
+
+		// Public spike stream (no-op unless --spike_stream). Sent every batch, even with zero spikes.
+		if (spikeStream.isEnabled()) {
+			const long long processUs = static_cast<long long>(batchAfter.tv_sec - batchBefore.tv_sec) * 1'000'000
+				+ (batchAfter.tv_nsec - batchBefore.tv_nsec) / 1'000;
+			spikeStream.sendBatch(times, templates, amplitudes,
+				static_cast<uint64_t>(recordingOffset + batchStartCt),
+				static_cast<uint64_t>(recordingOffset + batchStartCt + batchValidLen),
+				static_cast<uint32_t>(processUs > 0 ? processUs : 0));
+		}
 		//duplicate check in save spikes
 		// Debug
 		writeSpikesToFile(times, templates, amplitudes);

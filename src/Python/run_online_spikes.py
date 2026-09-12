@@ -1,13 +1,9 @@
-# Only numpy + stdlib are needed to open this GUI and launch OnlineSpikes.exe
-# against an existing oss_input/ (requirements-runtime.txt). torch, kilosort,
-# qtpy, and matplotlib are only needed to (re)run Kilosort4 -- see
-# requirements-training.txt -- and are imported lazily, inside the functions
-# that actually use them, so launching doesn't require installing them.
 import sys
 import pathlib
 from pathlib import Path
 from crop_methods import crop_kilosort_output, parse_bin_meta_file
 from subset_templates import subset_oss_input_inplace, parse_channel_range
+from sdm_processors import PROCESSORS, Context, default_values, to_exe_args
 import numpy as np
 import subprocess
 import time
@@ -85,6 +81,23 @@ tk.Label(drift_frame, text="Retrain threshold (um):").grid(row=4, column=0, padx
 tk.Entry(drift_frame, textvariable=drift_retrain_threshold_var, width=10).grid(row=4, column=1, sticky="w")
 tk.Button(drift_frame, text="?", command=lambda: show_hint("DRIFT_RETRAIN_THRESHOLD"), width=3).grid(row=4, column=3)
 
+# Public spike stream to external processes (shared across all sorters)
+spike_stream_enabled_var = tk.BooleanVar(value=False)
+spike_stream_addr_var = tk.StringVar(value="127.0.0.1:9100")
+
+stream_frame = tk.Frame(root, borderwidth=1, relief="groove")
+stream_frame.grid(row=1, column=8, columnspan=4, padx=5, pady=5, sticky="nw")
+
+tk.Label(stream_frame, text="Spike Stream (shared)", font=("TkDefaultFont", 9, "bold")).grid(
+    row=0, column=0, columnspan=4, padx=5, pady=(5, 2), sticky="w"
+)
+tk.Checkbutton(stream_frame, text="Stream spikes over UDP", variable=spike_stream_enabled_var).grid(
+    row=1, column=0, columnspan=2, padx=5, pady=5, sticky="w"
+)
+tk.Button(stream_frame, text="?", command=lambda: show_hint("SPIKE_STREAM"), width=3).grid(row=1, column=3)
+tk.Label(stream_frame, text="host:port:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+tk.Entry(stream_frame, textvariable=spike_stream_addr_var, width=18).grid(row=2, column=1, sticky="w")
+
 # Notebook for sorter tabs
 toolkit = ttk.Notebook(root)
 toolkit.grid(row=2, column=0, columnspan=4, padx=5, pady=5, sticky="nsew")
@@ -94,15 +107,11 @@ base_path_vars, ks_output_dir_vars = [], []
 bin_file_vars, meta_file_vars, chanmap_file_vars = [], [], []
 rerun_ks_vars, sdm_vars = [], []
 sdm_ip_vars, sdm_port_vars = [], []
-sdm_subset_vars, sdm_trigger_z_vars, sdm_baseline_min_seconds_vars, sdm_trigger_bin_ms_vars = [], [], [], []
+sdm_subset_vars, sdm_trigger_bin_ms_vars = [], []
 sdm_processor_vars = []
-sdm_mode_vars, sdm_offset_vars, sdm_boundary_us_vars = [], [], []
-# Per-population (FS/RS)
-sdm_offset_fs_low_vars, sdm_offset_fs_high_vars = [], []
-sdm_offset_rs_low_vars, sdm_offset_rs_high_vars = [], []
-sdm_z_fs_low_vars, sdm_z_fs_high_vars = [], []
-sdm_z_rs_low_vars, sdm_z_rs_high_vars = [], []
-cl_offset_entries, cl_z_entries = {}, {}
+sdm_param_vars = []
+sdm_param_frames = []       # per sorter: the frame holding the selected processor's widgets
+sdm_when_widgets = {}       # sorter idx -> [(Param, Entry)] for enabling fields by `when`
 max_templates_vars = []
 channel_range_vars = []
 file_frames, sdm_frames = [], []
@@ -115,33 +124,9 @@ HINTS = {
     "META": "The location of your recording's metadata (.meta file).",
     "CHANMAP": "The location of your probe's channel map (.mat file).",
     "SDM": "Send decoder output to stimulus display machine?",
-    "SDM_PROCESSOR": ("How spike activity is turned into an SDM packet, and the "
-                      "transport used. 'zscore' / 'logreg' send a 13-byte UDP packet "
-                      "(int8 direction, float32 z, uint64 sampleCt) Use 'zscore' for the "
-                      "firing-threshold trigger loop. 'closedloop' splits spikes "
-                      "into FS/RS populations and sends a 16-byte packet "
-                      "(int32 FS, int32 RS, uint64 sampleCt) for the FS/RS "
-                      "early-release loop."),
-    "SDM_CLOSEDLOOP": ("Closed-loop FS/RS trigger. Pick ONE stat with its radio; only "
-                       "that stat's grid is live. Each stat has FOUR independent knobs: "
-                       "the FS and RS populations x the low ('-') and high ('+') "
-                       "direction, so FS and RS need not match and the deadband need not "
-                       "be symmetric. 'median split': a population reads low when its "
-                       "per-bin value < training median - (low offset), high when "
-                       "> median + (high offset); an offset >= 0 widens that side of the "
-                       "neutral zone, 0 = split at the median on that side. "
-                       "'z-score': fires low when z < -(neg |z|) and high when "
-                       "z > +(pos |z|), z being the per-bin value standardized by the "
-                       "training mean/sd. Leave a field blank to fall back to the legacy "
-                       "symmetric value. "
-                       "'Waveform boundary (us)' is the FS/RS trough->peak "
-                       "cutoff (200 matches AnalysisGUI). The baseline is built "
-                       "automatically each launch from Kilosort's training sort "
-                       "(spike_times/spike_templates in oss_input) -- no re-streaming. "
-                       "'Build closed-loop baseline' just rebuilds it now, e.g. after "
-                       "changing the boundary or bin size. The 'Subset' field is set "
-                       "automatically to the FS+RS neurons -- you do not type templates "
-                       "by hand in closed-loop mode."),
+    "SDM_PROCESSOR": ("How spike activity is turned into packets for the stimulus "
+                      "display machine. Settings below change with the processor; "
+                      "each processor's own help is under its settings."),
     "MAX_TEMPLATES": ("Limit how many preclustered templates the sorter uses "
                       "(0 = use all). Fewer templates = less GPU work in "
                       "matchingPursuit = better real-time performance on low-spec "
@@ -182,92 +167,113 @@ HINTS = {
                                 "stop sorting and re-run Kilosort4 on the data "
                                 "recorded so far, then relaunch. Distinct from Max "
                                 "shift, which clamps the estimator itself."),
+    "SPIKE_STREAM": ("Stream every sorted spike over UDP to another process "
+                     "(Python, MATLAB, Bonsai, ...) so closed-loop logic can run "
+                     "outside LSS without writing C++. host:port of the receiver; "
+                     "127.0.0.1:9100 = a script on this machine. Fire-and-forget: "
+                     "a missing receiver is harmless. Receiver + packet format: "
+                     "src/Python/lss_stream.py. Shared by all sorters (packets "
+                     "carry a sorter id)."),
 }
 
 def show_hint(key):
     messagebox.showinfo("Hint", HINTS[key])
 
 
-def run_baseline_build(oss_in, boundary="200", bin_ms="100"):
-    """Compute FS/RS labels + closed-loop baseline stats for one oss_input dir,
-    straight from Kilosort's TRAINING sort (spike_times.npy + spike_templates.npy
-    already in oss_input) -- no re-streaming through LSS, no relaunch.
+def processor_values(idx, name):
+    """{key: value} of processor `name`'s settings for sorter idx."""
+    return {k: v.get().strip() for k, v in sdm_param_vars[idx].get(name, {}).items()}
 
-    Returns (ok, message). Fast (<1 s); safe to call automatically after Kilosort.
-    """
-    oss_in = Path(oss_in)
-    needed = ["templates.npy", "spike_times.npy", "spike_templates.npy"]
-    missing = [f for f in needed if not (oss_in / f).exists()]
-    if missing:
-        return False, (f"Missing {', '.join(missing)} in\n{oss_in}\n"
-                       "Run Kilosort4 (training) first.")
-    sdir = Path(__file__).parent.resolve()
-    wf = str(sdir / "waveform_classification.py")
-    bl = str(sdir / "closedloop_baseline.py")
-    labels = str(oss_in / "rs_fs_labels.csv")
+
+def apply_when(idx):
+    """Enable only the fields whose `when` condition holds (e.g. the median grid
+    while Stat == median). Cosmetic: every value is still saved and passed."""
+    proc = PROCESSORS.get(sdm_processor_vars[idx].get())
+    if proc is None:
+        return
+    values = processor_values(idx, proc.name)
     try:
-        out1 = subprocess.run([sys.executable, wf, str(oss_in),
-                               "--boundary-us", str(boundary)],
-                              capture_output=True, text=True, check=True)
-        out2 = subprocess.run([sys.executable, bl, str(oss_in),
-                               "--labels", labels, "--bin-ms", str(bin_ms)],
-                              capture_output=True, text=True, check=True)
-    except subprocess.CalledProcessError as e:
-        return False, (e.stderr or e.stdout or str(e))[-1500:]
-    return True, (out1.stdout + "\n" + out2.stdout).strip()[-1500:]
-
-
-def fs_rs_ids_from_labels(oss_in):
-    """Sorted FS∪RS template indices from oss_input/rs_fs_labels.csv (or [] if
-    absent). This IS the SDM subset for the closed-loop trigger -- only the
-    classified FS/RS neurons feed the per-bin high/low analysis."""
-    import csv as _csv
-    path = Path(oss_in) / "rs_fs_labels.csv"
-    if not path.exists():
-        return []
-    ids = []
-    with open(path, newline="") as fh:
-        for row in _csv.DictReader(fh):
-            if row.get("label", "").strip().upper() in ("FS", "RS"):
-                try:
-                    ids.append(int(row["template_index"]))
-                except (ValueError, KeyError):
-                    pass
-    return sorted(ids)
-
-
-def update_cl_mode(idx):
-    """Enable only the four threshold fields that the selected closed-loop stat
-    uses: the offset grid for 'median', the trigger-Z grid for 'zscore'. Purely
-    cosmetic -- makes it clear which knobs are live -- the run still passes both
-    sets of values."""
-    mode = sdm_mode_vars[idx].get()
-    offs = cl_offset_entries.get(idx) or []
-    zs = cl_z_entries.get(idx) or []
-    try:
-        for e in offs:
-            e.config(state=("normal" if mode == "median" else "disabled"))
-        for e in zs:
-            e.config(state=("normal" if mode == "zscore" else "disabled"))
+        for prm, entry in sdm_when_widgets.get(idx, []):
+            key, want = prm.when
+            entry.config(state=("normal" if values.get(key) == want else "disabled"))
     except tk.TclError:
         pass   # widget destroyed during a tab rebuild
 
 
-def build_closedloop_baseline(idx):
-    """Button handler: rebuild the baseline for sorter idx from its Kilosort
-    training sort, auto-fill the SDM subset with the FS+RS neurons, and pop up the
-    result. Use it to re-tune the waveform boundary or bin size without re-running
-    Kilosort."""
+def browse_param(var, kind):
+    if kind == "folder":
+        d = filedialog.askdirectory(initialdir=var.get() or str(Path.home()))
+        if d: var.set(d + "\\")
+    else:
+        f = filedialog.askopenfilename(initialdir=str(Path(var.get()).parent) if var.get() else str(Path.home()))
+        if f: var.set(f)
+
+
+def run_processor_button(idx):
+    """The selected processor's extra button (e.g. closedloop's baseline build)."""
+    proc = PROCESSORS[sdm_processor_vars[idx].get()]
+    label, hook = proc.button
     oss_in = Path(base_path_vars[idx].get().strip()) / "oss_input"
-    boundary = sdm_boundary_us_vars[idx].get().strip() or "200"
-    bin_ms = sdm_trigger_bin_ms_vars[idx].get().strip() or "100"
-    ok, msg = run_baseline_build(oss_in, boundary, bin_ms)
-    if ok:
-        ids = fs_rs_ids_from_labels(oss_in)
-        sdm_subset_vars[idx].set(",".join(str(x) for x in ids))
-        msg += f"\n\nSDM subset auto-set to {len(ids)} FS+RS neurons."
-    (messagebox.showinfo if ok else messagebox.showerror)(
-        "Closed-loop baseline" + ("" if ok else " failed"), msg)
+    res = hook(Context(oss_in, sdm_trigger_bin_ms_vars[idx].get().strip() or "100",
+                       processor_values(idx, proc.name)))
+    msg = res.message
+    if res.ok and res.subset is not None:
+        sdm_subset_vars[idx].set(",".join(str(x) for x in res.subset))
+        msg += f"\n\nSDM subset auto-set to {len(res.subset)} neurons."
+    (messagebox.showinfo if res.ok else messagebox.showerror)(label + ("" if res.ok else " failed"), msg)
+
+
+def render_processor_settings(idx):
+    """(Re)build sorter idx's settings panel for the processor chosen in its dropdown."""
+    frame = sdm_param_frames[idx]
+    if frame is None:
+        return
+    for w in frame.winfo_children():
+        w.destroy()
+    sdm_when_widgets[idx] = []
+    proc = PROCESSORS.get(sdm_processor_vars[idx].get())
+    if proc is None:
+        return
+    pvars = sdm_param_vars[idx][proc.name]
+    grid_row, row_slots = 0, {}      # row label -> [grid row, next free column]
+    for prm in proc.params:
+        var = pvars[prm.key]
+        if prm.row:                  # side-by-side group, e.g. "FS (median)   low - [ ]  high + [ ]"
+            if prm.row not in row_slots:
+                tk.Label(frame, text=prm.row + ":").grid(row=grid_row, column=0, sticky="e", padx=5)
+                row_slots[prm.row] = [grid_row, 1]
+                grid_row += 1
+            r, c = row_slots[prm.row]
+            tk.Label(frame, text=prm.label).grid(row=r, column=c, sticky="e")
+            widget = tk.Entry(frame, textvariable=var, width=prm.width)
+            widget.grid(row=r, column=c + 1, sticky="w", padx=(0, 8))
+            row_slots[prm.row][1] += 2
+        else:
+            tk.Label(frame, text=prm.label + ":").grid(row=grid_row, column=0, sticky="w", padx=5, pady=2)
+            if prm.choices:
+                widget = tk.Frame(frame)
+                for choice in prm.choices:
+                    tk.Radiobutton(widget, text=choice, variable=var, value=choice,
+                                   command=lambda i=idx: apply_when(i)).pack(side="left")
+            else:
+                widget = tk.Entry(frame, textvariable=var, width=prm.width)
+            widget.grid(row=grid_row, column=1, columnspan=4, sticky="w")
+            if prm.browse:
+                tk.Button(frame, text="Browse", command=lambda v=var, k=prm.browse: browse_param(v, k)).grid(
+                    row=grid_row, column=5, padx=5)
+            grid_row += 1
+        if prm.when and isinstance(widget, tk.Entry):
+            sdm_when_widgets[idx].append((prm, widget))
+    if proc.button:
+        tk.Button(frame, text=proc.button[0], command=lambda i=idx: run_processor_button(i)).grid(
+            row=grid_row, column=0, columnspan=3, padx=5, pady=5, sticky="w")
+    apply_when(idx)
+
+
+def show_processor_help(idx):
+    proc = PROCESSORS.get(sdm_processor_vars[idx].get())
+    messagebox.showinfo("SDM processor", (proc.help if proc else "Unknown processor.") +
+                        "\n\nSettings are declared in src/Python/sdm_processors.py.")
 
 def browse_directory(idx):
     d = filedialog.askdirectory(initialdir=base_path_vars[idx].get() or str(Path.home()), title="Select BASE_PATH")
@@ -313,13 +319,8 @@ def update_tabs():
         for lst in (base_path_vars, ks_output_dir_vars, bin_file_vars,
                     meta_file_vars, chanmap_file_vars, rerun_ks_vars,
                     sdm_vars, sdm_ip_vars, sdm_port_vars,
-                    sdm_subset_vars, sdm_trigger_z_vars, sdm_baseline_min_seconds_vars, sdm_trigger_bin_ms_vars,
-                    sdm_processor_vars,
-                    sdm_mode_vars, sdm_offset_vars, sdm_boundary_us_vars,
-                    sdm_offset_fs_low_vars, sdm_offset_fs_high_vars,
-                    sdm_offset_rs_low_vars, sdm_offset_rs_high_vars,
-                    sdm_z_fs_low_vars, sdm_z_fs_high_vars,
-                    sdm_z_rs_low_vars, sdm_z_rs_high_vars,
+                    sdm_subset_vars, sdm_trigger_bin_ms_vars,
+                    sdm_processor_vars, sdm_param_vars, sdm_param_frames,
                     max_templates_vars, channel_range_vars, file_frames, sdm_frames):
             del lst[n:]
 
@@ -335,21 +336,11 @@ def update_tabs():
         sdm_ip_vars.append(tk.StringVar(value=""))
         sdm_port_vars.append(tk.StringVar(value=""))
         sdm_subset_vars.append(tk.StringVar(value=""))
-        sdm_trigger_z_vars.append(tk.StringVar(value="1.0"))
-        sdm_baseline_min_seconds_vars.append(tk.StringVar(value="10.0"))
         sdm_trigger_bin_ms_vars.append(tk.StringVar(value="100"))
         sdm_processor_vars.append(tk.StringVar(value="zscore"))
-        sdm_mode_vars.append(tk.StringVar(value="median"))
-        sdm_offset_vars.append(tk.StringVar(value="0"))
-        sdm_offset_fs_low_vars.append(tk.StringVar(value="0"))
-        sdm_offset_fs_high_vars.append(tk.StringVar(value="0"))
-        sdm_offset_rs_low_vars.append(tk.StringVar(value="0"))
-        sdm_offset_rs_high_vars.append(tk.StringVar(value="0"))
-        sdm_z_fs_low_vars.append(tk.StringVar(value="1.0"))
-        sdm_z_fs_high_vars.append(tk.StringVar(value="1.0"))
-        sdm_z_rs_low_vars.append(tk.StringVar(value="1.0"))
-        sdm_z_rs_high_vars.append(tk.StringVar(value="1.0"))
-        sdm_boundary_us_vars.append(tk.StringVar(value="200"))
+        sdm_param_vars.append({proc: {k: tk.StringVar(value=v) for k, v in vals.items()}
+                               for proc, vals in default_values().items()})
+        sdm_param_frames.append(None)
         max_templates_vars.append(tk.StringVar(value="0"))
         channel_range_vars.append(tk.StringVar(value=""))
         file_frames.append(None)
@@ -469,100 +460,29 @@ def build_tab(frame, idx):
         row=2, column=1
     )
 
-    tk.Label(sdm_frame, text="Trigger Z:").grid(
+    tk.Label(sdm_frame, text="Trigger bin (ms):").grid(
         row=3, column=0, padx=5, pady=5
     )
-    tk.Entry(sdm_frame, textvariable=sdm_trigger_z_vars[idx], width=10).grid(
+    tk.Entry(sdm_frame, textvariable=sdm_trigger_bin_ms_vars[idx], width=10).grid(
         row=3, column=1
     )
 
-    tk.Label(sdm_frame, text="Baseline min seconds:").grid(
+    tk.Label(sdm_frame, text="Processor:").grid(
         row=4, column=0, padx=5, pady=5
     )
-    tk.Entry(sdm_frame, textvariable=sdm_baseline_min_seconds_vars[idx], width=10).grid(
-        row=4, column=1
-    )
-
-    tk.Label(sdm_frame, text="Trigger bin (ms):").grid(
-        row=5, column=0, padx=5, pady=5
-    )
-    tk.Entry(sdm_frame, textvariable=sdm_trigger_bin_ms_vars[idx], width=10).grid(
-        row=5, column=1
-    )
-
-    tk.Label(sdm_frame, text="Processor (transport):").grid(
-        row=6, column=0, padx=5, pady=5
-    )
-    tk.OptionMenu(sdm_frame, sdm_processor_vars[idx],
-                  "zscore", "logreg", "bincounts", "closedloop").grid(
-        row=6, column=1, sticky="w"
+    tk.OptionMenu(sdm_frame, sdm_processor_vars[idx], *PROCESSORS,
+                  command=lambda _choice, i=idx: render_processor_settings(i)).grid(
+        row=4, column=1, sticky="w"
     )
     tk.Button(
-        sdm_frame, text="?", command=lambda i=idx: show_hint("SDM_PROCESSOR"), width=3
-    ).grid(row=6, column=2)
+        sdm_frame, text="?", command=lambda i=idx: show_processor_help(i), width=3
+    ).grid(row=4, column=2)
 
-    # --- Closed-loop trigger ---
-    tk.Label(sdm_frame, text="— Closed-loop trigger (per-population FS/RS, asymmetric) —").grid(
-        row=7, column=0, columnspan=3, pady=(8, 0), sticky="w", padx=5
-    )
-    tk.Button(
-        sdm_frame, text="?", command=lambda i=idx: show_hint("SDM_CLOSEDLOOP"), width=3
-    ).grid(row=7, column=3)
+    param_frame = tk.Frame(sdm_frame)
+    param_frame.grid(row=5, column=0, columnspan=4, padx=5, pady=(0, 5), sticky="w")
+    sdm_param_frames[idx] = param_frame
+    render_processor_settings(idx)
 
-    # --- median split grid ---
-    tk.Radiobutton(sdm_frame, text="median split", variable=sdm_mode_vars[idx],
-                   value="median", command=lambda i=idx: update_cl_mode(i)).grid(
-        row=8, column=0, sticky="w", padx=5
-    )
-    tk.Label(sdm_frame, text="low offset (−)").grid(row=8, column=1, sticky="w")
-    tk.Label(sdm_frame, text="high offset (+)").grid(row=8, column=2, sticky="w")
-    tk.Label(sdm_frame, text="FS:").grid(row=9, column=0, sticky="e", padx=5)
-    off_fs_low = tk.Entry(sdm_frame, textvariable=sdm_offset_fs_low_vars[idx], width=8)
-    off_fs_low.grid(row=9, column=1, sticky="w")
-    off_fs_high = tk.Entry(sdm_frame, textvariable=sdm_offset_fs_high_vars[idx], width=8)
-    off_fs_high.grid(row=9, column=2, sticky="w")
-    tk.Label(sdm_frame, text="RS:").grid(row=10, column=0, sticky="e", padx=5)
-    off_rs_low = tk.Entry(sdm_frame, textvariable=sdm_offset_rs_low_vars[idx], width=8)
-    off_rs_low.grid(row=10, column=1, sticky="w")
-    off_rs_high = tk.Entry(sdm_frame, textvariable=sdm_offset_rs_high_vars[idx], width=8)
-    off_rs_high.grid(row=10, column=2, sticky="w")
-    tk.Label(sdm_frame, text="low if pop < median − low offset, high if pop > median + high offset").grid(
-        row=11, column=0, columnspan=4, sticky="w", padx=5
-    )
-
-    # --- z-score grid ---
-    tk.Radiobutton(sdm_frame, text="z-score", variable=sdm_mode_vars[idx],
-                   value="zscore", command=lambda i=idx: update_cl_mode(i)).grid(
-        row=12, column=0, sticky="w", padx=5
-    )
-    tk.Label(sdm_frame, text="neg |z| (−)").grid(row=12, column=1, sticky="w")
-    tk.Label(sdm_frame, text="pos |z| (+)").grid(row=12, column=2, sticky="w")
-    tk.Label(sdm_frame, text="FS:").grid(row=13, column=0, sticky="e", padx=5)
-    z_fs_low = tk.Entry(sdm_frame, textvariable=sdm_z_fs_low_vars[idx], width=8)
-    z_fs_low.grid(row=13, column=1, sticky="w")
-    z_fs_high = tk.Entry(sdm_frame, textvariable=sdm_z_fs_high_vars[idx], width=8)
-    z_fs_high.grid(row=13, column=2, sticky="w")
-    tk.Label(sdm_frame, text="RS:").grid(row=14, column=0, sticky="e", padx=5)
-    z_rs_low = tk.Entry(sdm_frame, textvariable=sdm_z_rs_low_vars[idx], width=8)
-    z_rs_low.grid(row=14, column=1, sticky="w")
-    z_rs_high = tk.Entry(sdm_frame, textvariable=sdm_z_rs_high_vars[idx], width=8)
-    z_rs_high.grid(row=14, column=2, sticky="w")
-    tk.Label(sdm_frame, text="low if z < − neg, high if z > + pos").grid(
-        row=15, column=0, columnspan=4, sticky="w", padx=5
-    )
-
-    cl_offset_entries[idx] = [off_fs_low, off_fs_high, off_rs_low, off_rs_high]
-    cl_z_entries[idx] = [z_fs_low, z_fs_high, z_rs_low, z_rs_high]
-    update_cl_mode(idx)
-
-    tk.Label(sdm_frame, text="Waveform boundary (us):").grid(row=16, column=0, padx=5, pady=5)
-    tk.Entry(sdm_frame, textvariable=sdm_boundary_us_vars[idx], width=10).grid(
-        row=16, column=1, sticky="w"
-    )
-    tk.Button(
-        sdm_frame, text="Build closed-loop baseline",
-        command=lambda i=idx: build_closedloop_baseline(i)
-    ).grid(row=17, column=0, columnspan=3, padx=5, pady=5, sticky="w")
     if sdm_vars[idx].get():
         sdm_frame.grid(row=row, column=0, columnspan=4,
                        padx=5, pady=5)
@@ -626,6 +546,24 @@ def create_finish_widgets():
 def finish_and_quit():
     root.destroy()
 
+def legacy_sdm_params(state, i):
+    """Processor settings from a multi_gui_state.json written before sdm_processors.py
+    existed (flat per-field keys), so saved FS/RS thresholds survive the upgrade."""
+    def get(key, default):
+        vals = state.get(key)
+        return vals[i] if isinstance(vals, list) and i < len(vals) else default
+    off, z = get("sdm_offsets", "0"), get("sdm_trigger_zs", "1.0")
+    return {
+        "zscore": {"trigger_z": z, "baseline_min_seconds": get("sdm_baseline_min_seconds", "10.0")},
+        "closedloop": {
+            "mode": get("sdm_modes", "median"), "boundary_us": get("sdm_boundary_us", "200"),
+            **{f"{pop}_offset_{side}": get(f"sdm_offset_{pop}_{side}", off)
+               for pop in ("fs", "rs") for side in ("low", "high")},
+            **{f"{pop}_z_{side}": get(f"sdm_z_{pop}_{side}", z)
+               for pop in ("fs", "rs") for side in ("low", "high")},
+        },
+    }
+
 # Initialize GUI (with state loading and applying)
 def main():
     # Load previous state
@@ -641,6 +579,8 @@ def main():
             drift_window_var.set(state.get("drift_window_s", drift_window_var.get()))
             drift_max_shift_var.set(state.get("drift_max_shift_um", drift_max_shift_var.get()))
             drift_retrain_threshold_var.set(state.get("drift_retrain_threshold_um", drift_retrain_threshold_var.get()))
+            spike_stream_enabled_var.set(state.get("spike_stream_enabled", spike_stream_enabled_var.get()))
+            spike_stream_addr_var.set(state.get("spike_stream_addr", spike_stream_addr_var.get()))
         except Exception as e:
             print(f"Could not load GUI state: {e}")
 
@@ -664,25 +604,15 @@ def main():
             sdm_ip_vars[i].set(state["sdm_ips"][i])
             sdm_port_vars[i].set(state["sdm_ports"][i])
             sdm_subset_vars[i].set(state.get("sdm_subsets", [""] * num_sorters_var.get())[i])
-            sdm_trigger_z_vars[i].set(state.get("sdm_trigger_zs", ["1.0"] * num_sorters_var.get())[i])
-            sdm_baseline_min_seconds_vars[i].set(state.get("sdm_baseline_min_seconds", ["10.0"] * num_sorters_var.get())[i])
             sdm_trigger_bin_ms_vars[i].set(state.get("sdm_trigger_bin_ms", ["50"] * num_sorters_var.get())[i])
             sdm_processor_vars[i].set(state.get("sdm_processors", ["zscore"] * num_sorters_var.get())[i])
-            sdm_mode_vars[i].set(state.get("sdm_modes", ["median"] * num_sorters_var.get())[i])
-            sdm_offset_vars[i].set(state.get("sdm_offsets", ["0"] * num_sorters_var.get())[i])
-            n_now = num_sorters_var.get()
-            legacy_off = state.get("sdm_offsets", ["0"] * n_now)[i]
-            legacy_z = state.get("sdm_trigger_zs", ["1.0"] * n_now)[i]
-            sdm_offset_fs_low_vars[i].set(state.get("sdm_offset_fs_low", [legacy_off] * n_now)[i])
-            sdm_offset_fs_high_vars[i].set(state.get("sdm_offset_fs_high", [legacy_off] * n_now)[i])
-            sdm_offset_rs_low_vars[i].set(state.get("sdm_offset_rs_low", [legacy_off] * n_now)[i])
-            sdm_offset_rs_high_vars[i].set(state.get("sdm_offset_rs_high", [legacy_off] * n_now)[i])
-            sdm_z_fs_low_vars[i].set(state.get("sdm_z_fs_low", [legacy_z] * n_now)[i])
-            sdm_z_fs_high_vars[i].set(state.get("sdm_z_fs_high", [legacy_z] * n_now)[i])
-            sdm_z_rs_low_vars[i].set(state.get("sdm_z_rs_low", [legacy_z] * n_now)[i])
-            sdm_z_rs_high_vars[i].set(state.get("sdm_z_rs_high", [legacy_z] * n_now)[i])
-            sdm_boundary_us_vars[i].set(state.get("sdm_boundary_us", ["200"] * num_sorters_var.get())[i])
-            update_cl_mode(i)   # refresh which trigger field is live for the loaded stat
+            saved = state.get("sdm_params") or []
+            saved = saved[i] if i < len(saved) else legacy_sdm_params(state, i)
+            for proc, vals in saved.items():
+                for key, val in vals.items():
+                    if key in sdm_param_vars[i].get(proc, {}):
+                        sdm_param_vars[i][proc][key].set(val)
+            render_processor_settings(i)
             max_templates_vars[i].set(state.get("max_templates", ["0"] * num_sorters_var.get())[i])
             channel_range_vars[i].set(state.get("channel_ranges", [""] * num_sorters_var.get())[i])
 
@@ -705,21 +635,10 @@ def run_online_multi():
     SDM_IPS = [v.get().strip() for v in sdm_ip_vars]
     SDM_PORTS = [v.get().strip() for v in sdm_port_vars]
     SDM_SUBSETS = [v.get().strip() for v in sdm_subset_vars]
-    SDM_TRIGGER_ZS = [v.get().strip() for v in sdm_trigger_z_vars]
-    SDM_BASELINE_MIN_SECONDS = [v.get().strip() for v in sdm_baseline_min_seconds_vars]
     SDM_TRIGGER_BIN_MS = [v.get().strip() for v in sdm_trigger_bin_ms_vars]
     SDM_PROCESSORS = [v.get().strip() for v in sdm_processor_vars]
-    SDM_MODES = [v.get().strip() for v in sdm_mode_vars]
-    SDM_OFFSETS = [v.get().strip() for v in sdm_offset_vars]
-    SDM_OFFSET_FS_LOW = [v.get().strip() for v in sdm_offset_fs_low_vars]
-    SDM_OFFSET_FS_HIGH = [v.get().strip() for v in sdm_offset_fs_high_vars]
-    SDM_OFFSET_RS_LOW = [v.get().strip() for v in sdm_offset_rs_low_vars]
-    SDM_OFFSET_RS_HIGH = [v.get().strip() for v in sdm_offset_rs_high_vars]
-    SDM_Z_FS_LOW = [v.get().strip() for v in sdm_z_fs_low_vars]
-    SDM_Z_FS_HIGH = [v.get().strip() for v in sdm_z_fs_high_vars]
-    SDM_Z_RS_LOW = [v.get().strip() for v in sdm_z_rs_low_vars]
-    SDM_Z_RS_HIGH = [v.get().strip() for v in sdm_z_rs_high_vars]
-    SDM_BOUNDARY_US = [v.get().strip() for v in sdm_boundary_us_vars]
+    SDM_PARAMS = [{proc: {k: v.get().strip() for k, v in keys.items()} for proc, keys in per.items()}
+                  for per in sdm_param_vars]
     MAX_TEMPLATES = [v.get().strip() for v in max_templates_vars]
     CHANNEL_RANGES = [v.get().strip() for v in channel_range_vars]
     SGLX_HOST = sglx_host_var.get().strip()
@@ -728,6 +647,8 @@ def run_online_multi():
     DRIFT_WINDOW_S = drift_window_var.get().strip()
     DRIFT_MAX_SHIFT_UM = drift_max_shift_var.get().strip()
     DRIFT_RETRAIN_THRESHOLD_UM = drift_retrain_threshold_var.get().strip()
+    SPIKE_STREAM_ENABLED = spike_stream_enabled_var.get()
+    SPIKE_STREAM_ADDR = spike_stream_addr_var.get().strip()
 
     # Save current state
     state = {
@@ -738,6 +659,8 @@ def run_online_multi():
         "drift_window_s": DRIFT_WINDOW_S,
         "drift_max_shift_um": DRIFT_MAX_SHIFT_UM,
         "drift_retrain_threshold_um": DRIFT_RETRAIN_THRESHOLD_UM,
+        "spike_stream_enabled": SPIKE_STREAM_ENABLED,
+        "spike_stream_addr": SPIKE_STREAM_ADDR,
         "base_paths": [str(p) for p in BASE_PATHS],
         "ks_output_dirs": [str(d) for d in KS_OUTPUT_DIRS],
         "bin_files": [str(p) for p in BIN_FILES],
@@ -748,21 +671,9 @@ def run_online_multi():
         "sdm_ips": SDM_IPS,
         "sdm_ports": SDM_PORTS,
         "sdm_subsets": SDM_SUBSETS,
-        "sdm_trigger_zs": SDM_TRIGGER_ZS,
-        "sdm_baseline_min_seconds": SDM_BASELINE_MIN_SECONDS,
         "sdm_trigger_bin_ms": SDM_TRIGGER_BIN_MS,
         "sdm_processors": SDM_PROCESSORS,
-        "sdm_modes": SDM_MODES,
-        "sdm_offsets": SDM_OFFSETS,
-        "sdm_offset_fs_low": SDM_OFFSET_FS_LOW,
-        "sdm_offset_fs_high": SDM_OFFSET_FS_HIGH,
-        "sdm_offset_rs_low": SDM_OFFSET_RS_LOW,
-        "sdm_offset_rs_high": SDM_OFFSET_RS_HIGH,
-        "sdm_z_fs_low": SDM_Z_FS_LOW,
-        "sdm_z_fs_high": SDM_Z_FS_HIGH,
-        "sdm_z_rs_low": SDM_Z_RS_LOW,
-        "sdm_z_rs_high": SDM_Z_RS_HIGH,
-        "sdm_boundary_us": SDM_BOUNDARY_US,
+        "sdm_params": SDM_PARAMS,
         "max_templates": MAX_TEMPLATES,
         "channel_ranges": CHANNEL_RANGES
     }
@@ -777,13 +688,14 @@ def run_online_multi():
                                      META_FILES, CHANMAP_FILES, RERUN_FLAGS,
                                      MAX_TEMPLATES, CHANNEL_RANGES)
 
-    for i, proc in enumerate(SDM_PROCESSORS):
-        if SDM_FLAGS[i] and proc == 'closedloop':
-            ok, msg = run_baseline_build(
-                OSS_DIRS[i], SDM_BOUNDARY_US[i] or "200",
-                SDM_TRIGGER_BIN_MS[i] or "100")
-            tag = "[closed-loop baseline]" if ok else "[closed-loop baseline] FAILED"
-            print(f"{tag} sorter {i+1}:\n{msg}")
+    PREPARED = {}
+    for i, proc_name in enumerate(SDM_PROCESSORS):
+        proc = PROCESSORS.get(proc_name)
+        if SDM_FLAGS[i] and proc is not None and proc.prepare is not None:
+            res = proc.prepare(Context(Path(OSS_DIRS[i]), SDM_TRIGGER_BIN_MS[i] or "100",
+                                       SDM_PARAMS[i].get(proc_name, {})))
+            print(f"[{proc_name}] sorter {i+1} prepare{'' if res.ok else ' FAILED'}:\n{res.message}")
+            PREPARED[i] = res
 
     # Build and run C++ command
     decoder_input_dirs = [bp / 'decoder_input' for bp in BASE_PATHS]
@@ -812,40 +724,22 @@ def run_online_multi():
 
         arguments['--sdm_ip'] = SDM_IPS[sdm_idx]
         arguments['--sdm_port'] = sdm_port
-        arguments['--sdm_processor'] = SDM_PROCESSORS[sdm_idx] or 'zscore'
-
-        if SDM_SUBSETS[sdm_idx]:
-            arguments['--sdm_subset'] = SDM_SUBSETS[sdm_idx]
-        if SDM_TRIGGER_ZS[sdm_idx]:
-            arguments['--sdm_trigger_z'] = SDM_TRIGGER_ZS[sdm_idx]
-        if SDM_BASELINE_MIN_SECONDS[sdm_idx]:
-            arguments['--sdm_baseline_min_seconds'] = SDM_BASELINE_MIN_SECONDS[sdm_idx]
+        proc_name = SDM_PROCESSORS[sdm_idx] or 'zscore'
+        arguments['--sdm_processor'] = proc_name
         if SDM_TRIGGER_BIN_MS[sdm_idx]:
             arguments['--sdm_trigger_bin_ms'] = SDM_TRIGGER_BIN_MS[sdm_idx]
 
-        if SDM_PROCESSORS[sdm_idx] == 'closedloop':
-            oss_dir = OSS_DIRS[sdm_idx]  # already has a trailing backslash
-            arguments['--sdm_mode'] = SDM_MODES[sdm_idx] or 'median'
-            arguments['--sdm_offset'] = SDM_OFFSETS[sdm_idx] or '0'
+        prepared = PREPARED.get(sdm_idx)
+        subset = SDM_SUBSETS[sdm_idx]
+        if prepared is not None and prepared.subset is not None:
+            subset = ",".join(str(x) for x in prepared.subset)
+        if subset:
+            arguments['--sdm_subset'] = subset
 
-            for flag, vals in (
-                ('--sdm_offset_fs_low',  SDM_OFFSET_FS_LOW),
-                ('--sdm_offset_fs_high', SDM_OFFSET_FS_HIGH),
-                ('--sdm_offset_rs_low',  SDM_OFFSET_RS_LOW),
-                ('--sdm_offset_rs_high', SDM_OFFSET_RS_HIGH),
-                ('--sdm_trigger_z_fs_low',  SDM_Z_FS_LOW),
-                ('--sdm_trigger_z_fs_high', SDM_Z_FS_HIGH),
-                ('--sdm_trigger_z_rs_low',  SDM_Z_RS_LOW),
-                ('--sdm_trigger_z_rs_high', SDM_Z_RS_HIGH),
-            ):
-                if vals[sdm_idx]:
-                    arguments[flag] = vals[sdm_idx]
-            arguments['--sdm_rs_fs'] = oss_dir + 'rs_fs_labels.csv'
-            arguments['--sdm_stats'] = oss_dir + 'closedloop_stats.txt'
-            # Subset is the FS+RS neurons from the baseline, not the manual field.
-            fs_rs_ids = fs_rs_ids_from_labels(oss_dir)
-            if fs_rs_ids:
-                arguments['--sdm_subset'] = ",".join(str(x) for x in fs_rs_ids)
+        # The processor's own settings, as --sdm_param key=value ... (see sdm_processors.py)
+        kv = to_exe_args(SDM_PARAMS[sdm_idx].get(proc_name, {}), prepared.params if prepared else None)
+        if kv:
+            arguments['--sdm_param'] = kv
 
     if DRIFT_ENABLED:
         if DRIFT_WINDOW_S:
@@ -854,6 +748,9 @@ def run_online_multi():
             arguments['--drift_max_shift_um'] = DRIFT_MAX_SHIFT_UM
         if DRIFT_RETRAIN_THRESHOLD_UM:
             arguments['--drift_retrain_threshold_um'] = DRIFT_RETRAIN_THRESHOLD_UM
+
+    if SPIKE_STREAM_ENABLED and SPIKE_STREAM_ADDR:
+        arguments['--spike_stream'] = SPIKE_STREAM_ADDR
 
     script_dir = pathlib.Path(__file__).parent.resolve()
     # Go back exactly two levels to reach the project root and build path to executable 
@@ -893,9 +790,6 @@ def run_online_multi():
             sentinel.unlink(missing_ok=True)
 
         if not retrain_sources:
-            # Normal exit (user quit, or an error). rc==RETRAIN_EXIT_CODE(42)
-            # without a resolvable sentinel means the recording couldn't be
-            # found -- already reported above; nothing more to do.
             break
 
         print(f"[Retrain] Re-running Kilosort4 for sorter(s) "

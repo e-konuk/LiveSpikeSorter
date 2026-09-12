@@ -20,6 +20,7 @@
 #include "../Networking/Sock.h"
 #include "../Networking/sorterParameters.h"
 #include "../Networking/FragmentManager.h"
+#include "../Networking/SpikeStream.h"
 #include "OnlineSpikesV2MemoryList.h"
 #include "TensorWrapper.h"
 #include "DriftEstimator.h"
@@ -140,6 +141,7 @@ private:
 	sockaddr_in decoderImecAddr;
 	sockaddr_in decoderNidqAddr;
 	DataSocket* sglxSock;
+	SpikeStream spikeStream; 
 
 	// Leftover stuff from previous code
 	std::vector<double> activeChannels;

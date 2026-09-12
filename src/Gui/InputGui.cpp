@@ -3,6 +3,7 @@
 #include <ImGUI/imgui.h>
 #include <ImGUI/imgui_stdlib.h>
 
+#include "../Decoder/SdmProcessor.h" 
 #include "../Networking/NetworkHelpers.h"
 #include "../Helpers/GuiHelpers.h"
 #include "InputGui.h"
@@ -58,18 +59,9 @@ InputGUI::InputGUI(InputParameters cmdLineParams)
 	Params.sdmIP = cmdLineParams.sdmIP;
 	Params.sdmPort = cmdLineParams.sdmPort;
 	Params.vSdmActivitySubset = cmdLineParams.vSdmActivitySubset;
-	Params.sdmTriggerZ = cmdLineParams.sdmTriggerZ;
-	Params.sdmBaselineMinSeconds = cmdLineParams.sdmBaselineMinSeconds;
 	Params.sdmTriggerBinMs = cmdLineParams.sdmTriggerBinMs;
 	Params.sdmProcessorType = cmdLineParams.sdmProcessorType;
-	Params.sdmMode = cmdLineParams.sdmMode;
-	Params.sdmOffset = cmdLineParams.sdmOffset;
-	Params.sdmStatsPath = cmdLineParams.sdmStatsPath;
-	Params.sdmRsFsPath = cmdLineParams.sdmRsFsPath;
-	Params.sSdmSpikesFile = cmdLineParams.sSdmSpikesFile;
-	Params.sSdmEventFile = cmdLineParams.sSdmEventFile;
-	Params.sSdmDecoderWorkFolder = cmdLineParams.sSdmDecoderWorkFolder;
-	Params.sdmDecoderWindowMs = cmdLineParams.sdmDecoderWindowMs;
+	Params.mapSdmParams = cmdLineParams.mapSdmParams;  
 
 	/* -------- device selection -------- */
 	Params.vSelectedDevices = cmdLineParams.vSelectedDevices;
@@ -96,6 +88,7 @@ InputGUI::InputGUI(InputParameters cmdLineParams)
 	ensure_key(Params.mapOSSOutputFolders, Params.sOSSOutputFolder);
 
 	Params.bSkipInputGui = cmdLineParams.bSkipInputGui;
+	Params.sSpikeStreamAddr = cmdLineParams.sSpikeStreamAddr;
 
 	// Live drift estimation
 	Params.bDriftEstimation = cmdLineParams.bDriftEstimation;
@@ -438,32 +431,22 @@ void InputGUI::gatherDecoderParameters() {
 
 	if (ImGui::CollapsingHeader("SDM Processor")) {
 		ImGui::Text("SDM Processor Type:");
-		ImGui::SameLine(); HelpMarker("Select the SDM processing strategy: 'zscore' for z-score baseline, 'logreg' for logistic regression, 'bincounts' for raw per-channel spike counts over TCP.");
-		bool isZscore = (Params.sdmProcessorType == "zscore");
-		bool isLogreg = (Params.sdmProcessorType == "logreg");
-		bool isBincounts = (Params.sdmProcessorType == "bincounts");
-		if (ImGui::RadioButton("Z-Score", isZscore)) Params.sdmProcessorType = "zscore";
-		ImGui::SameLine();
-		if (ImGui::RadioButton("Logistic Regression", isLogreg)) Params.sdmProcessorType = "logreg";
-		ImGui::SameLine();
-		if (ImGui::RadioButton("Bin Counts", isBincounts)) Params.sdmProcessorType = "bincounts";
+		ImGui::SameLine(); HelpMarker("How spikes become packets for the stimulus display machine. Settings for each processor are normally set in the Python launcher (src/Python/sdm_processors.py).");
+		const std::vector<std::string> names = registeredSdmProcessors();
+		for (size_t i = 0; i < names.size(); ++i) {
+			if (i > 0) ImGui::SameLine();
+			if (ImGui::RadioButton(names[i].c_str(), Params.sdmProcessorType == names[i]))
+				Params.sdmProcessorType = names[i];
+		}
 
-		if (Params.sdmProcessorType == "logreg") {
-			ImGui::Text("SDM Training Spikes File:");
-			ImGui::SameLine(); HelpMarker("Spike output file from a prior recording session (CSV: time,channel,amplitude).");
-			InputTextWithFileDialog("##SdmSpikesFile", &Params.sSdmSpikesFile, "Select##sdmSpikesButton", Params.sDecoderWorkFolder.c_str(), 1, txtFilterPattern, 0);
-
-			ImGui::Text("SDM Training Event File:");
-			ImGui::SameLine(); HelpMarker("Event file with labels (space-separated: time label, label = 0 or 1).");
-			InputTextWithFileDialog("##SdmEventFile", &Params.sSdmEventFile, "Select##sdmEventButton", Params.sDecoderWorkFolder.c_str(), 1, txtFilterPattern, 0);
-
-			ImGui::Text("SDM Decoder Work Folder:");
-			ImGui::SameLine(); HelpMarker("Folder for intermediate SDM decoder files.");
-			InputTextWithFileDialog("##SdmWorkFolder", &Params.sSdmDecoderWorkFolder, "Select##sdmWorkButton", Params.sDecoderWorkFolder.c_str(), NULL, NULL, NULL, true);
-
-			ImGui::Text("SDM Decoder Window (ms):");
-			ImGui::SameLine(); HelpMarker("Window length in milliseconds for the logistic regression feature vector.");
-			ImGui::InputInt("##SdmDecoderWindowMs", &Params.sdmDecoderWindowMs);
+		ImGui::Text("Processor settings (key = value):");
+		ImGui::SameLine(); HelpMarker("Passed to the processor as --sdm_param key=value. Empty until the launcher or command line sets them.");
+		for (auto& kv : Params.mapSdmParams) {
+			ImGui::Text("%s", kv.first.c_str());
+			ImGui::SameLine(220);
+			ImGui::PushItemWidth(540);
+			ImGui::InputText(("##sdm_param_" + kv.first).c_str(), &kv.second);
+			ImGui::PopItemWidth();
 		}
 	}
 }

@@ -180,6 +180,7 @@ copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll
     <ClCompile Include="src\NetClient\Socket.cpp" />
     <ClCompile Include="src\Networking\NetworkHelpers.cpp" />
     <ClCompile Include="src\Networking\Sock.cpp" />
+    <ClCompile Include="src\Networking\SpikeStream.cpp" />
     <ClCompile Include="src\Decoder\dataBinner.cpp" />
     <ClCompile Include="src\SpikeSorter\ThresholdCrossing.cpp" />
   </ItemGroup>
@@ -222,6 +223,7 @@ copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll
     <ClInclude Include="src\Decoder\SdmProcessor.h" />
     <ClInclude Include="src\Decoder\ZScoreSdmProcessor.h" />
     <ClInclude Include="src\Decoder\ClosedLoopSdmProcessor.h" />
+    <ClInclude Include="src\Decoder\SdmParams.h" />
     <ClInclude Include="src\Decoder\LogRegSdmProcessor.h" />
     <ClInclude Include="src\Decoder\BinCountSdmProcessor.h" />
     <ClInclude Include="src\Helpers\FileWriter.h" />
@@ -239,6 +241,7 @@ copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll
     <ClInclude Include="src\Networking\onlineSpikesPayload.h" />
     <ClInclude Include="src\Networking\SerializationHelpers.h" />
     <ClInclude Include="src\Networking\Sock.h" />
+    <ClInclude Include="src\Networking\SpikeStream.h" />
     <ClInclude Include="src\Networking\sorterParameters.h" />
     <ClInclude Include="src\Helpers\Utils.h" />
     <ClInclude Include="src\SpikeSorter\TensorWrapper.h" />

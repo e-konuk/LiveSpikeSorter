@@ -21,12 +21,7 @@ struct InputParameters {
 								sOSSOutputFolder{},
 								sdmIP{},
 								sdmProcessorType{ "zscore" },
-								sdmMode{ "median" },
-								sdmStatsPath{},
-								sdmRsFsPath{},
-								sSdmSpikesFile{},
-								sSdmEventFile{},
-								sSdmDecoderWorkFolder{};
+								sSpikeStreamAddr{};   // "host:port" for the public UDP spike stream; empty = off
 
 	uint16						uDataAccquisitionPort{ 0 },
 								uSelectedDevice{ 0 };
@@ -44,25 +39,10 @@ struct InputParameters {
 								dThreshold,
 								dRatioToMax;
 
-	float						sdmTriggerZ{ 1.0f },
-								sdmBaselineMinSeconds{ 10.0f },
-								sdmOffset{ 0.0f };
+	int							sdmTriggerBinMs{ 50 };
 
-	// Per-population (FS/RS) thresholds used for closed loop demo.
-	//   median mode: FS low  if pop < fsMedian - sdmOffsetFsLow
-	//                FS high if pop > fsMedian + sdmOffsetFsHigh  (RS analogous)
-	//   zscore mode: FS low  if z   < -sdmTriggerZFsLow
-	//                FS high if z   >  sdmTriggerZFsHigh          (RS analogous)
-	float						sdmOffsetFsLow{ std::numeric_limits<float>::quiet_NaN() },
-								sdmOffsetFsHigh{ std::numeric_limits<float>::quiet_NaN() },
-								sdmOffsetRsLow{ std::numeric_limits<float>::quiet_NaN() },
-								sdmOffsetRsHigh{ std::numeric_limits<float>::quiet_NaN() },
-								sdmTriggerZFsLow{ std::numeric_limits<float>::quiet_NaN() },
-								sdmTriggerZFsHigh{ std::numeric_limits<float>::quiet_NaN() },
-								sdmTriggerZRsLow{ std::numeric_limits<float>::quiet_NaN() },
-								sdmTriggerZRsHigh{ std::numeric_limits<float>::quiet_NaN() };
-	int							sdmTriggerBinMs{ 50 },
-								sdmDecoderWindowMs{ 300 };
+	// Settings owned by processor
+	std::map<std::string, std::string>	mapSdmParams;
 
 	float						fImecSamplingRate,
 								fNidqSamplingRate,

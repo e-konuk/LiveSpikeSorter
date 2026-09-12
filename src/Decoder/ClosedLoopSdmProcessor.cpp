@@ -30,20 +30,23 @@ ClosedLoopSdmProcessor::~ClosedLoopSdmProcessor() = default;
 void ClosedLoopSdmProcessor::init(const InputParameters& params,
                                   const std::vector<long>& /*activitySubset*/)
 {
-	m_mode = (params.sdmMode == "zscore") ? MODE_ZSCORE : MODE_MEDIAN;
+	SdmParams p(params.mapSdmParams);
+	m_mode = (p.getString("mode", "median") == "zscore") ? MODE_ZSCORE : MODE_MEDIAN;
 
-	// Per-population/per-direction threshold (4 conditions for FS/RS):
-	auto pick = [](float specific, float fallback) {
-		return std::isnan(specific) ? fallback : specific;
-	};
-	m_fsOffLow  = pick(params.sdmOffsetFsLow,  params.sdmOffset);
-	m_fsOffHigh = pick(params.sdmOffsetFsHigh, params.sdmOffset);
-	m_rsOffLow  = pick(params.sdmOffsetRsLow,  params.sdmOffset);
-	m_rsOffHigh = pick(params.sdmOffsetRsHigh, params.sdmOffset);
-	m_fsZLow    = pick(params.sdmTriggerZFsLow,  params.sdmTriggerZ);
-	m_fsZHigh   = pick(params.sdmTriggerZFsHigh, params.sdmTriggerZ);
-	m_rsZLow    = pick(params.sdmTriggerZRsLow,  params.sdmTriggerZ);
-	m_rsZHigh   = pick(params.sdmTriggerZRsHigh, params.sdmTriggerZ);
+	// Per-population/per-direction threshold (4 conditions for FS/RS). Each falls
+	// back to the symmetric "offset" / "trigger_z" when not given.
+	const float offset = p.getFloat("offset", 0.0f);
+	const float triggerZ = p.getFloat("trigger_z", 1.0f);
+	m_fsOffLow  = p.getFloat("fs_offset_low",  offset);
+	m_fsOffHigh = p.getFloat("fs_offset_high", offset);
+	m_rsOffLow  = p.getFloat("rs_offset_low",  offset);
+	m_rsOffHigh = p.getFloat("rs_offset_high", offset);
+	m_fsZLow    = p.getFloat("fs_z_low",  triggerZ);
+	m_fsZHigh   = p.getFloat("fs_z_high", triggerZ);
+	m_rsZLow    = p.getFloat("rs_z_low",  triggerZ);
+	m_rsZHigh   = p.getFloat("rs_z_high", triggerZ);
+	const std::string rsFsPath = p.getString("rs_fs_path");
+	const std::string statsPath = p.getString("stats_path");
 
 	m_samplingRateHz = params.fImecSamplingRate;
 	m_binMs = params.sdmTriggerBinMs;
@@ -53,13 +56,13 @@ void ClosedLoopSdmProcessor::init(const InputParameters& params,
 	m_fsBinCounts.clear();
 	m_rsBinCounts.clear();
 
-	if (!loadLabels(params.sdmRsFsPath)) {
+	if (!loadLabels(rsFsPath)) {
 		std::cerr << "[ClosedLoop] ERROR: could not read RS/FS labels from '"
-		          << params.sdmRsFsPath << "'. FS/RS states will all be 0." << std::endl;
+		          << rsFsPath << "'. FS/RS states will all be 0." << std::endl;
 	}
-	if (!loadStats(params.sdmStatsPath)) {
+	if (!loadStats(statsPath)) {
 		std::cerr << "[ClosedLoop] ERROR: could not read stats from '"
-		          << params.sdmStatsPath << "'. FS/RS states will all be 0 until provided."
+		          << statsPath << "'. FS/RS states will all be 0 until provided."
 		          << std::endl;
 	}
 
@@ -233,3 +236,5 @@ void ClosedLoopSdmProcessor::sendPacket(Sock& sdmSock, uint64_t glxSampleCt, lon
 		          << std::endl;
 	}
 }
+
+REGISTER_SDM_PROCESSOR("closedloop", ClosedLoopSdmProcessor);

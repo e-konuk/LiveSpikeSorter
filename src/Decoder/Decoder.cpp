@@ -7,6 +7,7 @@
 #include <sstream>
 #include "Decoder.h"
 #include "ZScoreSdmProcessor.h"
+#include "ClosedLoopSdmProcessor.h"
 #include "LogRegSdmProcessor.h"
 #include "BinCountSdmProcessor.h"
 #include "../Networking/NetworkHelpers.h"
@@ -88,6 +89,8 @@ Decoder::Decoder(std::vector<sockaddr_in> sorterImecAddrs, std::vector<sockaddr_
 		m_sdmProcessor = std::make_unique<BinCountSdmProcessor>();
 	} else if (params.sdmProcessorType == "logreg") {
 		m_sdmProcessor = std::make_unique<LogRegSdmProcessor>();
+	} else if (params.sdmProcessorType == "closedloop") {
+		m_sdmProcessor = std::make_unique<ClosedLoopSdmProcessor>();
 	} else {
 		m_sdmProcessor = std::make_unique<ZScoreSdmProcessor>();
 	}

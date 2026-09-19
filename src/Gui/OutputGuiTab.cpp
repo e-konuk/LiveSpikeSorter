@@ -238,11 +238,12 @@ void OutputGuiTab::DrawImGUI(const ImVec2 windowCenter) {
 	// Gui state
 	static bool showRaster = true;
 	static bool showNeuronInfo = true;
+	static bool showDrift = true;
 	static bool showProcessTimes = true;
 	static bool showVRMS = false;
 	static bool showP2P = false;
 	static bool showTrialInfo = true;
-	static bool showDrift = false;
+
 
 	ImGui::Begin("Plot Menu");
 	ImGui::Checkbox("Spike Raster", &showRaster);
@@ -738,11 +739,13 @@ void OutputGuiTab::plotProcessTimes(const ImVec2 windowCenter, bool &showProcess
 		ImPlot::SetupAxisLimits(ImAxis_X1, 0, range, ImPlotCond_Always);
 		ImPlot::SetupAxisLimits(ImAxis_Y1, 0, yMax, ImPlotCond_Always);
 		ImPlot::SetupLegend(ImPlotLocation_NorthEast);
-		ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
+		ImPlot::SetNextFillStyle(ImVec4(0.867f, 0.518f, 0.322f, 1.0f), 0.5f); // Set color to orange
 		processingTimeMutex.lock();
 		lastPeak = ImPlot::PlotHistogram("ProcessTimes", m_vProcessTimes.data() + toSkip, toShow, bins, false, true, ImPlotRange(0, range));
 		processingTimeMutex.unlock();
+		ImPlot::PushStyleColor(ImPlotCol_Line, ImVec4(0.0f, 0.0f, 0.0f, 1.0f)); // black
 		ImPlot::PlotVLines("Batch Size", &maxScanWindow, 1);
+		ImPlot::PopStyleColor();
 		ImPlot::EndPlot();
 	}
 	ImGui::End();

@@ -37,13 +37,6 @@ python -m venv venv
 venv\Scripts\activate
 pip install -r requirements.txt
 ```
-Use Python 3.10. From the repository root:
-
-```bash
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-```
 
 ## Running LSS 
 

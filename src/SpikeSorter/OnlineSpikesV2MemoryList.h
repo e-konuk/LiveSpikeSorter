@@ -20,6 +20,7 @@ enum MemoryType {
 	X(long, spikeTemplates, Pinned, unclu_T * W) \
 	X(long, spikeTimes, Pinned, unclu_T * W) \
 	X(float, spikeAmplitudes, Pinned, unclu_T * W) \
+	X(float, spikeMatchScores, Pinned, unclu_T * W) \
 	X(float, closest_x, Pinned, unclu_T * W) \
 	X(float, closest_y, Pinned, unclu_T * W) \
     \
@@ -56,6 +57,7 @@ enum MemoryType {
 	X(long, d_imax, Device, W) \
 	X(float, d_Cfmaxpool, Device, W) \
 	X(float, d_amps, Device, W * unclu_T) \
+	X(float, d_scores, Device, W * unclu_T) \
 	X(float, d_residual, Device, C * W) \
 	X(float, d_residualContribution, Device, C * W) \
 	X(float, d_convContribution, Device, unclu_T * W) \

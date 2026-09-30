@@ -64,7 +64,7 @@ tk.Label(drift_frame, text="Drift Correction (shared)", font=("TkDefaultFont", 9
     row=0, column=0, columnspan=4, padx=5, pady=(5, 2), sticky="w"
 )
 
-tk.Checkbutton(drift_frame, text="Real-time drift estimation", variable=drift_enabled_var).grid(
+tk.Checkbutton(drift_frame, text="Real-time drift correction", variable=drift_enabled_var).grid(
     row=1, column=0, columnspan=2, padx=5, pady=5, sticky="w"
 )
 tk.Button(drift_frame, text="?", command=lambda: show_hint("DRIFT_ENABLED"), width=3).grid(row=1, column=3)
@@ -142,16 +142,22 @@ HINTS = {
                   "running on this same machine, leave as 127.0.0.1. Shared by all "
                   "sorters (they use one SpikeGLX connection)."),
     "SGLX_PORT": ("The port SpikeGLX is streaming on. Shared by all sorters."),
-    "DRIFT_ENABLED": ("Enable real-time rigid drift estimation + correction. Each "
-                      "batch is scanned with Kilosort's universal templates (on "
-                      "whitened, NOT yet drift-corrected data), the depth and "
-                      "amplitude of those detections are binned into an activity "
-                      "fingerprint over a window, and that fingerprint is registered "
-                      "against the training reference to give a vertical shift (um). "
-                      "The drift-correction matrix is then rebuilt live. A drift "
-                      "trace is shown in the output GUI. Shared by all sorters. "
-                      "Requires the universal-template exports in oss_input/ -- "
-                      "re-run Kilosort4 once if they are missing."),
+    "DRIFT_ENABLED": ("Controls BOTH the live drift estimate and the correction "
+                      "applied to the data. ON: each batch is scanned with "
+                      "Kilosort's universal templates (on whitened, NOT yet "
+                      "drift-corrected data), the depth and amplitude of those "
+                      "detections are binned into an activity fingerprint over a "
+                      "window, and that fingerprint is registered against the "
+                      "training reference to give an absolute vertical shift (um). "
+                      "The correction matrix is rebuilt from that shift every "
+                      "window, replacing the static one, and a drift trace is shown "
+                      "in the output GUI. OFF: no estimate and no trace; the sorter "
+                      "falls back to the STATIC drift_matrix.npy that Kilosort "
+                      "produced at training time, which never updates -- this is the "
+                      "control condition for drift experiments, not a "
+                      "correction-free one. Shared by all sorters. Requires the "
+                      "universal-template exports in oss_input/ -- re-run Kilosort4 "
+                      "once if they are missing."),
     "DRIFT_WINDOW": ("Length in seconds of the window used to estimate drift. "
                      "Longer = more spikes = more robust estimate but slower to "
                      "react. Targets slow drift; 10 s is a good starting point and "
@@ -958,7 +964,69 @@ def run_kilosort_with_drift_plots(settings, probe_name=None, results_dir=None,
                                tic0=tic0)
     save_sorting(ops, results_dir, st, clu, tF, Wall, bfile.imin, tic0)
 
+    save_match_baseline(ops, results_dir, st, clu)
+
     return drift_snapshot
+
+
+def save_match_baseline(ops, results_dir, st, clu):
+    """
+    Per-final-cluster match strength measured on the TRAINING recording, so the
+    live sorter can report each unit as a percentage of how well Kilosort itself
+    matched that template when it built it.
+
+    st comes from detect_spikes, i.e. from template_matching.extract():
+      st[:,1] = preclustered template index (indexes Wall3)
+      st[:,2] = matching-pursuit amplitude, amp = B/nm with nm = ||U||^2
+
+    Kilosort gates detection on Cf = relu(B)^2/nm > Th_learned^2, so
+      sqrt(Cf) = B/||U|| = amp * sqrt(nm)
+    and dividing by Th_learned puts it on the same >= 1.0 scale the live sorter
+    reports. Same formula, same Th, same templates -> directly comparable.
+    """
+    from pathlib import Path
+    results_dir = Path(results_dir)
+    try:
+        Wall3 = np.load(results_dir / 'Wall3.npy')          # [unclu_T, K, C]
+    except Exception as e:
+        print(f"[MatchBaseline] Wall3.npy unavailable ({e}); skipping baseline export.")
+        return
+
+    Th = float(ops['Th_learned'])
+    if Th <= 0:
+        print("[MatchBaseline] Th_learned is not positive; skipping baseline export.")
+        return
+
+    st  = np.asarray(st)
+    clu = np.asarray(clu).astype(np.int64)
+    if st.shape[0] != clu.shape[0]:
+        print(f"[MatchBaseline] st ({st.shape[0]}) and clu ({clu.shape[0]}) "
+              f"lengths disagree; skipping baseline export.")
+        return
+
+    nm = (Wall3.astype(np.float64) ** 2).reshape(Wall3.shape[0], -1).sum(axis=1)
+
+    tmpl = st[:, 1].astype(np.int64)
+    amp  = st[:, 2].astype(np.float64)
+    ok   = (tmpl >= 0) & (tmpl < nm.shape[0])
+    scores = np.zeros(st.shape[0], dtype=np.float64)
+    scores[ok] = amp[ok] * np.sqrt(nm[tmpl[ok]]) / Th
+
+    nClusters = int(clu.max()) + 1 if clu.size else 0
+    baseline = np.zeros(nClusters, dtype=np.float32)
+    counts   = np.zeros(nClusters, dtype=np.int64)
+    for c in range(nClusters):
+        sel = (clu == c) & ok
+        n = int(sel.sum())
+        counts[c] = n
+        if n:
+            baseline[c] = float(np.median(scores[sel]))
+
+    np.save(results_dir / 'match_baseline.npy', baseline)
+    nz = counts > 0
+    print(f"[MatchBaseline] {int(nz.sum())}/{nClusters} clusters, "
+          f"median baseline {np.median(baseline[nz]) if nz.any() else float('nan'):.3f} "
+          f"(x detection threshold) -> match_baseline.npy")
 
 
 def _to_numpy(x, dtype=None):
@@ -1136,6 +1204,14 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
         np.save(oss_in / 'yc.npy', yc)
         np.save(oss_in / 'preclustered_template_waveforms.npy', pre_wf)
         np.save(oss_in / 'cluster_centroids_pca.npy', cluster_centroids_pca)
+        # Training-recording match baseline (absent on oss_input dirs built by an
+        # older launcher -- the GUI falls back to showing raw match strength).
+        mb_src = ks_out / 'match_baseline.npy'
+        if mb_src.exists():
+            np.save(oss_in / 'match_baseline.npy', np.load(mb_src))
+        else:
+            print("Note: match_baseline.npy not in kilosort output; "
+                  "re-run Kilosort4 to enable % of training match.")
         # --- Real-time drift estimation exports ---
         iKxx = np.ascontiguousarray(np.array(ops['iKxx'], dtype=np.float32))
         np.save(oss_in / 'iKxx.npy', iKxx)

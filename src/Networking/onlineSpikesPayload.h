@@ -28,6 +28,9 @@ struct OnlineSpikesPayload {
 	long		driftUpdateCt = 0;    
 	float		driftShiftUm = 0.0f;  
 
+	// OMP confidence
+	std::vector<float> MatchScores;
+
 	// Using the Cereal serialization library
 	template <class Archive>
 	void serialize(Archive & ar)
@@ -47,7 +50,8 @@ struct OnlineSpikesPayload {
 			nCorrect,
 			confidence,
 			driftUpdateCt, 
-			driftShiftUm);  
+			driftShiftUm,
+			MatchScores);  
 	}
 };
 #endif

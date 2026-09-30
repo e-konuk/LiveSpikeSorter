@@ -66,7 +66,7 @@ private:
 	// ---------------------------------------------------------------
 	SorterParameters getSorterParams();
 	void writeSpikesToFile(std::vector<long> spikeTimes, std::vector<long> spikeTemplates, std::vector<float> spikeAmplitudes);
-	void saveSpikes(long lNInds, long lStreamSampleCtOffset, long lEndValid, std::vector<long>& Times, std::vector<long>& Templates, std::vector<float>& Amplitudes);
+	void saveSpikes(long lNInds, long lStreamSampleCtOffset, long lEndValid, std::vector<long>& Times, std::vector<long>& Templates, std::vector<float>& Amplitudes, std::vector<float>& MatchScores);
 
 	// Debug
 	std::string ossOutputDir;

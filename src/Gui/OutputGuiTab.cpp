@@ -46,6 +46,7 @@ OutputGuiTab::OutputGuiTab(std::string tabName, std::string ossInputDir, float r
 	m_sOssInputDir(ossInputDir)
 {
 	plotWindowClass.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoDockingOverMe;
+	loadMatchBaseline();
 	std::thread fmThread = fm.assemblerThread();
 	fmThread.detach();
 };
@@ -94,6 +95,13 @@ void OutputGuiTab::setupOutput(sockaddr_in mainAddr, long m_lMaxScanWind, long m
 	m_fSampRate = params.m_fSampRate;
 	m_dChanpos = params.m_dChanpos;
 	m_vNeuronIndices = params.m_vNeuronIndices;
+
+	if (!m_vfMatchBaseline.empty() && (long)m_vfMatchBaseline.size() != m_lT) {
+		std::cout << "[MatchBaseline] WARNING: " << m_vfMatchBaseline.size()
+		          << " baselines but " << m_lT << " clusters -- match percentages "
+		             "may be paired with the wrong units. Re-run Kilosort4."
+		          << std::endl;
+	}
 
 	int min = INT_MAX;
 	for (auto &index : m_vNeuronIndices) if (index < min) min = index;
@@ -207,8 +215,13 @@ void OutputGuiTab::UpdateEvents() {
 			if (neur < m_lT) {
 				m_bNeurons[neur]->AddSpike(payload.Times[i]);
 				m_bNeurons[neur]->AddSpikeAmplitude(payload.Amplitudes[i]);
+				if (i < (int)payload.MatchScores.size())
+					m_bNeurons[neur]->AddMatchScore(payload.MatchScores[i],
+					                                payload.Times[i], m_fSampRate);
 			}
 		}
+
+		updatePopulationMatch();
 
 		for (int n = 0; n < m_lT; ++n) {
 			m_bNeurons[n]->CalcSpikeRate(&streamSampleCt,
@@ -243,6 +256,7 @@ void OutputGuiTab::DrawImGUI(const ImVec2 windowCenter) {
 	static bool showVRMS = false;
 	static bool showP2P = false;
 	static bool showTrialInfo = true;
+	static bool showMatchScores = false;
 
 
 	ImGui::Begin("Plot Menu");
@@ -252,6 +266,7 @@ void OutputGuiTab::DrawImGUI(const ImVec2 windowCenter) {
 	//ImGui::Checkbox("VRMS", &showVRMS);
 	ImGui::Checkbox("P2P", &showP2P);
 	ImGui::Checkbox("Drift Trace", &showDrift);
+	ImGui::Checkbox("Match Quality", &showMatchScores);
 	//ImGui::Checkbox("Trial Info", &showTrialInfo);
 	ImGui::End();
 
@@ -275,6 +290,9 @@ void OutputGuiTab::DrawImGUI(const ImVec2 windowCenter) {
 
 	if (showDrift)
 		plotDriftTrace(windowCenter, showDrift);
+
+	if (showMatchScores)
+		plotMatchScores(windowCenter, showMatchScores);
 
 	//if (showTrialInfo)
 	//	displayTrialInfo(windowCenter, showTrialInfo);
@@ -450,6 +468,16 @@ void OutputGuiTab::plotRaster(const ImVec2 windowCenter, bool &showRaster) {
 	ImGui::End();
 }
 
+float OutputGuiTab::matchPctForNeuron(int idx) const {
+	if (idx < 0 || idx >= (int)m_vfMatchBaseline.size()) return -1.0f;
+	const float base = m_vfMatchBaseline[idx];
+	if (base <= 0.0f) return -1.0f;
+	const float cur = m_bNeurons[idx]->CurrentMatchScore(streamSampleCt, m_fSampRate);
+	if (cur <= 0.0f) return -1.0f;   // no score yet, or silent for a full window
+	return 100.0f * cur / base;
+}
+
+
 void OutputGuiTab::displayNeuronInfo(const ImVec2 windowCenter, bool &showNeuronInfo) {
 	ImGui::SetNextWindowPos(windowCenter, ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
 	ImGui::SetNextWindowSize(ImVec2(350, 400), ImGuiCond_FirstUseEver);
@@ -467,6 +495,16 @@ void OutputGuiTab::displayNeuronInfo(const ImVec2 windowCenter, bool &showNeuron
 		ImGui::SameLine();
 		txt = " FR: " + formatFixed2(m_bNeurons[ij]->GetSpikeRate()) + "Hz, nSpikes: " + std::to_string(m_bNeurons[ij]->GetTotSpikeCount());
 		ImGui::Text(txt.c_str());
+
+		const float pct = matchPctForNeuron(ij);
+		if (pct >= 0.0f) {
+			ImGui::SameLine();
+			ImVec4 col;
+			if      (pct < 70.0f) col = ImVec4(0.95f, 0.35f, 0.30f, 1.0f);  // red
+			else if (pct < 85.0f) col = ImVec4(1.00f, 0.75f, 0.20f, 1.0f);  // amber
+			else                  col = ImVec4(0.45f, 0.45f, 0.45f, 1.0f);  // grey
+			ImGui::TextColored(col, ", match %.0f%%", pct);
+		}
 	}
 	ImGui::End();
 }
@@ -619,6 +657,26 @@ void OutputGuiTab::plotDriftTrace(const ImVec2 windowCenter, bool &showDrift) {
 	}
 	ImGui::End();
 }
+
+// Reads match_baseline from oss_input/
+void OutputGuiTab::loadMatchBaseline() {
+	if (m_sOssInputDir.empty()) return;
+
+	try {
+		cnpy::NpyArray a = cnpy::npy_load(m_sOssInputDir + "match_baseline.npy");
+		if (a.shape.size() != 1 || a.word_size != sizeof(float)) return;
+		const float* d = a.data<float>();
+		m_vfMatchBaseline.assign(d, d + a.shape[0]);
+		std::cout << "[MatchBaseline] loaded " << m_vfMatchBaseline.size()
+		          << " cluster baselines from match_baseline.npy" << std::endl;
+	}
+	catch (const std::exception&) {
+		// Older oss_input: the panels fall back to raw match strength.
+		std::cout << "[MatchBaseline] match_baseline.npy not found in oss_input; "
+		             "re-run Kilosort4 to enable % of training match." << std::endl;
+	}
+}
+
 
 void OutputGuiTab::loadDriftReference() {
 	m_bDriftRefLoaded = true;   // one attempt only, success or not
@@ -796,6 +854,7 @@ Neuron::Neuron(int number)
 	, m_vfSpikeRate()
 	, m_SpikeRate(0)
 	, spikeTimeMutex()
+	, m_lLastScoreSampleCt(-1)
 {
 };
 
@@ -838,6 +897,12 @@ void Neuron::Update(OutputGuiTab* outputGUI) {
 
 		if (ImGui::CollapsingHeader("ISI Histogram"))
 			plotISI();
+
+		if (ImGui::CollapsingHeader("Match Score")) {
+			const std::vector<float>& mb = outputGUI->m_vfMatchBaseline;
+			plotMatchScore((m_inumber >= 0 && m_inumber < (int)mb.size())
+			               ? mb[m_inumber] : -1.0f);
+		}
 
 		//if (ImGui::CollapsingHeader("PST Histogram"))
 		//	plotPSTHs(outputGUI->eventTimes, outputGUI->eventLabels, outputGUI->m_fSampRate);
@@ -1367,6 +1432,60 @@ void Neuron::AddSpikeAmplitude(float amp) {
 	m_vfSpikeAmplitude.push_back(amp);
 }
 
+// Rolling median of the matching-pursuit match score over the last 30 s.
+static const float MATCH_WINDOW_SEC   = 30.0f; // rolling median width
+static const float MATCH_SAMPLE_SEC   = 1.0f;
+
+void Neuron::AddMatchScore(float score, long timeSamples, float sampRate) {
+	if (sampRate <= 0.0f) return;
+	std::lock_guard<std::mutex> lk(scoreMutex);
+
+	m_dqScoreWin.emplace_back(timeSamples, score);
+	if (m_lFirstScoreCt < 0) m_lFirstScoreCt = timeSamples;
+	m_lLastScoreSpikeCt = timeSamples;
+
+	const long windowSamples = (long)(MATCH_WINDOW_SEC * sampRate);
+	while (!m_dqScoreWin.empty() &&
+	       timeSamples - m_dqScoreWin.front().first > windowSamples) {
+		m_dqScoreWin.pop_front();
+	}
+
+
+	if (timeSamples - m_lFirstScoreCt < windowSamples) return;
+
+	const long sampleStride = (long)(MATCH_SAMPLE_SEC * sampRate);
+	if (m_lLastScoreSampleCt >= 0 && timeSamples - m_lLastScoreSampleCt < sampleStride)
+		return;
+	m_lLastScoreSampleCt = timeSamples;
+
+	if (m_dqScoreWin.empty()) return;
+
+	std::vector<float> s;
+	s.reserve(m_dqScoreWin.size());
+	for (const auto& p : m_dqScoreWin) s.push_back(p.second);
+	const size_t mid = s.size() / 2;
+	std::nth_element(s.begin(), s.begin() + mid, s.end());
+	float median = s[mid];
+	if (s.size() % 2 == 0) {
+		const float lo = *std::max_element(s.begin(), s.begin() + mid);
+		median = 0.5f * (median + lo);
+	}
+
+	m_vfScoreMedian.push_back(median);
+	m_vfScoreTimeSec.push_back((float)(timeSamples / (double)sampRate));
+	m_fScoreCurrent = median;
+}
+
+float Neuron::CurrentMatchScore(long nowSampleCt, float sampRate) {
+	std::lock_guard<std::mutex> lk(scoreMutex);
+	if (m_fScoreCurrent <= 0.0f || m_lLastScoreSpikeCt < 0 || sampRate <= 0.0f)
+		return -1.0f;
+	const long windowSamples = (long)(MATCH_WINDOW_SEC * sampRate);
+	if (nowSampleCt - m_lLastScoreSpikeCt > windowSamples)
+		return -1.0f;   // silent for a whole window: its last value is stale
+	return m_fScoreCurrent;
+}
+
 void Neuron::SetChanNum(int Channum) {
 	m_iChannumber = Channum;
 }
@@ -1429,4 +1548,189 @@ void Neuron::CalcSpikeRate(long *streamSampleCount, long TimeWindow, float Sampl
 		m_SpikeRate = count / TimeWindowSecs;
 	}
 
+}
+
+
+// ---------------------------------------------------------------------------
+// Population match quality
+
+void OutputGuiTab::updatePopulationMatch() {
+	if (m_fSampRate <= 0.0f) return;
+
+	const long stride = (long)(1.0f * m_fSampRate); 
+	if (m_lLastPopSampleCt >= 0 && streamSampleCt - m_lLastPopSampleCt < stride)
+		return;
+	m_lLastPopSampleCt = streamSampleCt;
+
+	if (m_vfMatchBaseline.empty()) return;
+
+	std::vector<float> ratios;
+	ratios.reserve(m_lT);
+	int below = 0;
+	int silent = 0;
+	for (int i = 0; i < m_lT; ++i) {
+		if (i >= (int)m_vfMatchBaseline.size()) break;
+		const float base = m_vfMatchBaseline[i];
+		if (base <= 0.0f) continue;
+		bool everScored;
+		{
+			std::lock_guard<std::mutex> lk(m_bNeurons[i]->scoreMutex);
+			everScored = m_bNeurons[i]->m_fScoreCurrent > 0.0f;
+		}
+		if (!everScored) continue;  // nothing
+		const float cur = m_bNeurons[i]->CurrentMatchScore(streamSampleCt, m_fSampRate);
+		if (cur <= 0.0f) { ++silent; continue; }
+		const float r = 100.0f * cur / base;
+		ratios.push_back(r);
+		if (r < 85.0f) ++below;
+	}
+
+	std::lock_guard<std::mutex> lk(popMatchMutex);
+	m_iPopContributing = (int)ratios.size();
+	m_iPopBelow85 = below;
+	m_iPopSilent = silent;
+	if (ratios.empty()) return;
+
+	std::nth_element(ratios.begin(), ratios.begin() + ratios.size() / 2, ratios.end());
+	const float median = ratios[ratios.size() / 2];
+
+	m_vfPopMatchPct.push_back(median);
+	m_vfPopMatchTimeSec.push_back((float)(streamSampleCt / (double)m_fSampRate));
+}
+
+
+void OutputGuiTab::plotMatchScores(const ImVec2 windowCenter, bool &showMatchScores) {
+	ImGui::SetNextWindowPos(windowCenter, ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
+	ImGui::SetNextWindowSize(ImVec2(560, 380), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowClass(&plotWindowClass);
+	if (!ImGui::Begin("Match quality", &showMatchScores)) { ImGui::End(); return; }
+
+	std::vector<float> xs, ys;
+	int contributing, below, silent;
+	{
+		std::lock_guard<std::mutex> lk(popMatchMutex);
+		xs = m_vfPopMatchTimeSec;
+		ys = m_vfPopMatchPct;
+		contributing = m_iPopContributing;
+		below = m_iPopBelow85;
+		silent = m_iPopSilent;
+	}
+
+	if (ys.empty()) {
+		ImGui::TextUnformatted("Waiting for spikes (or: no match_baseline.npy in oss_input -- re-run Kilosort4)");
+		ImGui::End();
+		return;
+	}
+
+	ImGui::SetNextItemWidth(160.0f);
+	ImGui::InputInt("History (s)##pop", &m_iMatchHistorySec, 60, 300);
+	if (m_iMatchHistorySec < 60) m_iMatchHistorySec = 60;
+
+	const float current = ys.back();
+	if (current < 90.0f)
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.2f, 1.0f));
+	ImGui::Text("Population match: %.0f%% of training", current);
+	if (current < 90.0f)
+		ImGui::PopStyleColor();
+	ImGui::SameLine();
+	ImGui::TextDisabled("(%d units tracked, %d below 85%%, %d silent >30 s)",
+	                    contributing, below, silent);
+
+	const float tMax = xs.back();
+	float tLo = tMax - (float)m_iMatchHistorySec;
+	if (tLo < 0.0f) tLo = 0.0f;
+	ImPlot::SetNextAxisLimits(ImAxis_X1, tLo, (tMax > tLo) ? tMax : tLo + 1.0f,
+	                          ImPlotCond_Always);
+
+	if (ImPlot::BeginPlot("##popmatch", ImVec2(-1, -1))) {
+		ImPlot::SetupAxes("Time from start of recording (h:mm:ss)",
+		                  "Median match strength");
+		ImPlot::SetupAxisFormat(ImAxis_X1, RasterTimeAxisFormatter);
+		ImPlot::SetupLegend(ImPlotLocation_North,
+		                    ImPlotLegendFlags_Outside | ImPlotLegendFlags_Horizontal);
+
+		double hundred = 100.0;
+		ImPlot::SetNextLineStyle(ImVec4(0.0f, 0.0f, 0.0f, 1.0f), 2.5f);
+		ImPlot::PlotHLines("training match", &hundred, 1);
+
+		ImPlot::SetNextLineStyle(ImVec4(0.10f, 0.35f, 0.85f, 1.0f), 2.5f);
+		ImPlot::PlotLine("population median", xs.data(), ys.data(), (int)xs.size());
+
+		ImPlot::EndPlot();
+	}
+
+	ImGui::TextDisabled("Median over firing units of (live 30 s median match strength / that unit's training median).");
+	ImGui::End();
+}
+
+// per-neuron score
+void Neuron::plotMatchScore(float trainingBaseline) {
+
+	std::vector<float> xs, ys;
+	{
+		std::lock_guard<std::mutex> lk(scoreMutex);
+		xs = m_vfScoreTimeSec;
+		ys = m_vfScoreMedian;
+	}
+
+	if (ys.empty()) {
+		ImGui::TextUnformatted("No match scores yet for this unit");
+		return;
+	}
+
+	ImGui::SetNextItemWidth(160.0f);
+	ImGui::InputInt("History (s)##match", &m_iMatchHistorySec, 30, 120);
+	if (m_iMatchHistorySec < 30) m_iMatchHistorySec = 30;
+
+	const float current = ys.back();
+	const bool haveBaseline = (trainingBaseline > 0.0f);
+	const float pct = haveBaseline ? 100.0f * current / trainingBaseline : 0.0f;
+
+	if (haveBaseline) {
+		if (pct < 85.0f)
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.2f, 1.0f));
+		ImGui::Text("%.0f%% of training match", pct);
+		if (pct < 85.0f)
+			ImGui::PopStyleColor();
+		ImGui::SameLine();
+		ImGui::TextDisabled("(live %.2f, training %.2f)", current, trainingBaseline);
+	}
+	else {
+		ImGui::Text("live match strength %.2f", current);
+		ImGui::SameLine();
+		ImGui::TextDisabled("(no training baseline -- re-run Kilosort4)");
+	}
+
+	// plot
+	float plotH = ImGui::GetContentRegionAvail().y - 30.0f;
+	if (plotH < 260.0f) plotH = 260.0f;
+	if (plotH > 420.0f) plotH = 420.0f;
+
+	const float tMax = xs.back();
+	float tLo = tMax - (float)m_iMatchHistorySec;
+	if (tLo < 0.0f) tLo = 0.0f;
+	ImPlot::SetNextAxisLimits(ImAxis_X1, tLo, (tMax > tLo) ? tMax : tLo + 1.0f,
+	                          ImPlotCond_Always);
+
+	if (ImPlot::BeginPlot("##matchscore", ImVec2(-1, plotH))) {
+		ImPlot::SetupAxes("Time from start of recording (h:mm:ss)",
+		                  "Match strength");
+		ImPlot::SetupAxisFormat(ImAxis_X1, RasterTimeAxisFormatter);
+		// Setup the legend OUTSIDE the plot area.
+		ImPlot::SetupLegend(ImPlotLocation_North,
+		                    ImPlotLegendFlags_Outside | ImPlotLegendFlags_Horizontal);
+
+		if (haveBaseline) {
+			double b = trainingBaseline;
+			ImPlot::SetNextLineStyle(ImVec4(0.0f, 0.0f, 0.0f, 1.0f), 2.5f);
+			ImPlot::PlotHLines("training baseline", &b, 1);
+		}
+
+		ImPlot::SetNextLineStyle(ImVec4(0.10f, 0.35f, 0.85f, 1.0f), 2.5f);   // blue
+		ImPlot::PlotLine("30 s median", xs.data(), ys.data(), (int)xs.size());
+
+		ImPlot::EndPlot();
+	}
+
+	//ImGui::TextDisabled("Black line = how well Kilosort matched this unit on the training recording.");
 }

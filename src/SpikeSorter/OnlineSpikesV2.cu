@@ -101,13 +101,14 @@ __global__ void fwd_max_pool_1d_kernel(float* __restrict__ d_matrix, float* __re
 	}
 }
 
-__global__ void compute_amps_kernel(const float* __restrict__ d_B, const float* __restrict__ d_nm, const long* __restrict__ d_spikeIndices, float* d_result, long numSpikes, long T, long W) {
+__global__ void compute_amps_kernel(const float* __restrict__ d_B, const float* __restrict__ d_nm, const long* __restrict__ d_spikeIndices, float* d_result, const float* __restrict__ d_Cf, float* d_score, long numSpikes, long T, long W) {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx < numSpikes) {
 		long spikeIdx = d_spikeIndices[idx];
 		long sampleIdx = spikeIdx % W;
 		long templateIdx = spikeIdx / W;
 		d_result[idx] = d_B[templateIdx * W + sampleIdx] * d_nm[templateIdx];
+		d_score[idx] = d_Cf[spikeIdx];
 	}
 }
 
@@ -788,6 +789,7 @@ void OnlineSpikesV2::runSpikeSorting()
 	std::vector<long> times;
 	std::vector<long> templates;
 	std::vector<float> amplitudes;
+	std::vector<float> matchScores;
 	memset(lastSpikeTime.data(), 0, sizeof(long) * T);
 
 	// Parameters specific to each individual OSS during parallelization
@@ -946,7 +948,7 @@ void OnlineSpikesV2::runSpikeSorting()
 		// Save the spikes into times, templates, amplitudes
 		const long batchStartCt = latestCt - currBatchNumSamples + 1;
 		const long batchValidLen = currBatchNumSamples - minWindow; // spikes past this are deferred to the next batch
-		saveSpikes(numSpikes, batchStartCt, batchValidLen, times, templates, amplitudes);
+		saveSpikes(numSpikes, batchStartCt, batchValidLen, times, templates, amplitudes, matchScores);
 
 		clock_gettime(batchAfter);
 		long processTime = GetTimeDiff(batchAfter, batchBefore);
@@ -961,6 +963,18 @@ void OnlineSpikesV2::runSpikeSorting()
 								p2p,
 								processTime
 		};
+
+		payload.MatchScores = matchScores;
+
+		// // ----------------------------------------------------------------
+		// // DIAGNOSTIC TEMP verification probe -- delete this once confirmed.
+		// if (!matchScores.empty()) {
+		// 	auto mm = std::minmax_element(matchScores.begin(), matchScores.end());
+		// 	std::cout << "[MatchScore] n=" << matchScores.size() << "/" << times.size()
+		// 	          << " min=" << *mm.first << " max=" << *mm.second << std::endl;
+		// }
+		// // ----------------------------------------------------------------
+
 
 		// Latest drift estimate.
 		{
@@ -990,6 +1004,7 @@ void OnlineSpikesV2::runSpikeSorting()
 		times.clear();
 		templates.clear();
 		amplitudes.clear();
+		matchScores.clear();
 	}
 }
 
@@ -1072,6 +1087,7 @@ long OnlineSpikesV2::kilosortMatchingPursuit(float* d_batch, long currBatchNumSa
 	memset(spikeTemplates, 0, unclu_T * currBatchNumSamples * sizeof(long));
 	memset(spikeTimes, 0, unclu_T * currBatchNumSamples * sizeof(long));
 	memset(spikeAmplitudes, 0, unclu_T * currBatchNumSamples * sizeof(long));
+	memset(spikeMatchScores, 0, unclu_T * currBatchNumSamples * sizeof(float));
 	d_spikeIndices.clear();
 
 	for (int j = 0; j < 50; j++) {
@@ -1124,12 +1140,14 @@ long OnlineSpikesV2::kilosortMatchingPursuit(float* d_batch, long currBatchNumSa
 		{
 			Timer timer("Compute Amplitudes");
 			_CUDA_CALL(cudaMemset(d_amps, 0, unclu_T * currBatchNumSamples * sizeof(float)));
+			_CUDA_CALL(cudaMemset(d_scores, 0, unclu_T * currBatchNumSamples * sizeof(float)));
 			auto blocksPerGrid = (d_spikeIndices.size() + DEFAULT_TPB - 1) / DEFAULT_TPB;
-			compute_amps_kernel <<<blocksPerGrid, DEFAULT_TPB>>> (d_convResult, d_nm, thrust::raw_pointer_cast(d_spikeIndices.data()), d_amps, d_spikeIndices.size(), unclu_T, currBatchNumSamples);
+			compute_amps_kernel <<<blocksPerGrid, DEFAULT_TPB>>> (d_convResult, d_nm, thrust::raw_pointer_cast(d_spikeIndices.data()), d_amps, d_convNormalized, d_scores, d_spikeIndices.size(), unclu_T, currBatchNumSamples);
 			_CUDA_CALL(cudaDeviceSynchronize());
 		}
 	
 		_CUDA_CALL(cudaMemcpy(spikeAmplitudes + numSpikes - d_spikeIndices.size(), d_amps, d_spikeIndices.size() * sizeof(float), cudaMemcpyDeviceToHost));
+		_CUDA_CALL(cudaMemcpy(spikeMatchScores + numSpikes - d_spikeIndices.size(), d_scores, d_spikeIndices.size() * sizeof(float), cudaMemcpyDeviceToHost));
 		_CUDA_CALL(cudaDeviceSynchronize());
 
 		// Update the residual by removing the contribution of the spikes from both the raw batch and the convolution result.
@@ -1319,19 +1337,22 @@ typename std::vector<T>::iterator insert_sorted(std::vector<T> &vec, T const& it
 void OnlineSpikesV2::saveSpikes(
 	long numSpikes,
 	long startSampleOffset, long endSampleOffset, 
-	std::vector<long>& times, std::vector<long>& templates, std::vector<float>& amplitudes
+	std::vector<long>& times, std::vector<long>& templates, std::vector<float>& amplitudes,
+	std::vector<float>& matchScores
 ) 
 {
 	static const char *ptLabel = { "OnlineSpikes::saveSpikes" }; _UNUSED(*ptLabel);
 	long  sampleInd;
 	long  templateInd;
 	float amplitude;
+	float matchScore;
 
 	//Loop over found spikes
 	for (long i = 0; i < numSpikes; i++) {
 		sampleInd = spikeTimes[i] - M / 2 - M + nt0min; // just copying kilosort here
 		sampleInd -= lookback;							// to account for our overlapping batches
 		amplitude = spikeAmplitudes[i];	
+		matchScore = (Th_learned > 0) ? sqrtf(spikeMatchScores[i]) / (float)Th_learned : 0.0f;
 		templateInd = closestCluster(closest_x[i], closest_y[i]);
 
 		// if template is spiking too soon, skip
@@ -1348,5 +1369,6 @@ void OnlineSpikesV2::saveSpikes(
 		size_t pos = itr - times.begin(); // Get position of where new time was inserted
 		templates.insert(templates.begin() + pos, templateInd);
 		amplitudes.insert(amplitudes.begin() + pos, amplitude);
+		matchScores.insert(matchScores.begin() + pos, matchScore);
 	}
 }

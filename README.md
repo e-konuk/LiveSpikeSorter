@@ -5,7 +5,7 @@ Live Spike Sorter (LSS) is a GPU-accelerated real-time spike sorter for extracel
 > **Recommended before your first experiment:** do a full offline test run. Replay a
 > recording you already have through a SpikeGLX simulated probe, so the entire pipeline
 > runs exactly as it would on the rig with no hardware attached. The
-> [Offline Sorting Guide](OfflineSortingGuide.txt) covers first-time machine setup and
+> [Offline Sorting Guide](OfflineSortingGuide.md) covers first-time machine setup and
 > the per-session workflow.
 
 ## Prerequisites

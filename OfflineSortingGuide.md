@@ -1,10 +1,10 @@
-# Offline Spike Sorting -- Setup & Run Guide
+# Offline Spike Sorting - Setup & Run Guide
 
 This guide covers running the Live Spike Sorter (LSS) against a previously recorded `.ap.bin` file. It assumes you already have the recording you want to sort and a Windows machine with a CUDA-capable GPU to run the sorter on.
 
 ---
 
-## A -- One-Time Machine Setup
+## A - One-Time Machine Setup
 
 You only need to do these steps once per machine. Skip to [A6](#a6-install-python-310--environment-setup) if all your prerequisites are installed. Skip to [PART B](#part-b----session-workflow) if your machine is already set up.
 

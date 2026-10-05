@@ -6,31 +6,31 @@
     "drift_window_s": "10",
     "drift_max_shift_um": "50",
     "drift_retrain_threshold_um": "50",
-    "spike_stream_enabled": true,
+    "spike_stream_enabled": false,
     "spike_stream_addr": "127.0.0.1:9100",
     "base_paths": [
-        "D:\\OSSExperiments\\03_13_26"
+        ""
     ],
     "ks_output_dirs": [
-        "D:\\OSSExperiments\\03_13_26\\oss_input"
+        ""
     ],
     "bin_files": [
-        "C:\\Users\\Spike Sorter\\OSSExperiments\\260514_train_g0\\260514_train_g0_imec0\\260514_train_g0_t0.imec0.ap.bin"
+        ""
     ],
     "meta_files": [
-        "C:\\Users\\Spike Sorter\\OSSExperiments\\260514_train_g0\\260514_train_g0_imec0\\260514_train_g0_t0.imec0.ap.meta"
+        ""
     ],
     "chanmap_files": [
-        "C:\\Users\\Spike Sorter\\OSSExperiments\\channel_maps\\neuropixels_NHP_channel_map_dev_staggered_v1.mat"
+        ""
     ],
     "rerun_flags": [
-        false
-    ],
-    "sdm_flags": [
         true
     ],
+    "sdm_flags": [
+        false
+    ],
     "sdm_ips": [
-        "192.168.1.1"
+        "192.168.10.1"
     ],
     "sdm_ports": [
         "9999"

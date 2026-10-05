@@ -71,6 +71,9 @@
             }
         }
     ],
+    "template_filter_flags": [
+        false
+    ],
     "max_templates": [
         "0"
     ],

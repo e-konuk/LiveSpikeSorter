@@ -18,9 +18,9 @@ import json
 # Persistence config
 # -------------------------------
 STATE_FILE = Path(__file__).parent / "multi_gui_state.json"
-
 root = tk.Tk()
 root.title("Live Spike Sorter \u2014 Configuration")
+
 # -------------------------------
 # GUI: Global Config
 # -------------------------------
@@ -116,9 +116,10 @@ sdm_processor_vars = []
 sdm_param_vars = []
 sdm_param_frames = []       # per sorter: the frame holding the selected processor's widgets
 sdm_when_widgets = {}       # sorter idx -> [(Param, Entry)] for enabling fields by `when`
+template_toggle_vars = []
 max_templates_vars = []
 channel_range_vars = []
-file_frames, sdm_frames = [], []
+template_frames, file_frames, sdm_frames = [], [], []
 
 # Hints dictionary
 HINTS = {
@@ -316,6 +317,10 @@ def toggle_rerun(idx):
     if rerun_ks_vars[idx].get(): file_frames[idx].grid()
     else: file_frames[idx].grid_remove()
 
+def toggle_template(idx):
+    if template_toggle_vars[idx].get(): template_frames[idx].grid()
+    else: template_frames[idx].grid_remove()
+
 def toggle_sdm(idx):
     if sdm_vars[idx].get(): sdm_frames[idx].grid()
     else: sdm_frames[idx].grid_remove()
@@ -331,7 +336,8 @@ def update_tabs():
                     sdm_vars, sdm_ip_vars, sdm_port_vars,
                     sdm_subset_vars, sdm_trigger_bin_ms_vars,
                     sdm_processor_vars, sdm_param_vars, sdm_param_frames,
-                    max_templates_vars, channel_range_vars, file_frames, sdm_frames):
+                    template_toggle_vars, max_templates_vars, channel_range_vars,
+                    template_frames, file_frames, sdm_frames):
             del lst[n:]
 
     # Append new entries if increasing
@@ -351,8 +357,10 @@ def update_tabs():
         sdm_param_vars.append({proc: {k: tk.StringVar(value=v) for k, v in vals.items()}
                                for proc, vals in default_values().items()})
         sdm_param_frames.append(None)
+        template_toggle_vars.append(tk.BooleanVar(value=False))
         max_templates_vars.append(tk.StringVar(value="0"))
         channel_range_vars.append(tk.StringVar(value=""))
+        template_frames.append(None)
         file_frames.append(None)
         sdm_frames.append(None)
 
@@ -367,12 +375,13 @@ def update_tabs():
 # Construct UI for a single sorter tab
 def build_tab(frame, idx):
     row = 0
-    # Rerun checkbox
+    # Rerun group: checkbox plus the file paths it reveals
+    rerun_group = tk.Frame(frame)
+    rerun_group.grid(row=row, column=0, columnspan=4, padx=5, pady=5, sticky="w")
     tk.Checkbutton(
-        frame, text="Rerun Kilosort4", variable=rerun_ks_vars[idx],
+        rerun_group, text="Rerun Kilosort4", variable=rerun_ks_vars[idx],
         command=lambda i=idx: toggle_rerun(i)
-    ).grid(row=row, column=0, columnspan=4,
-           padx=5, pady=5, sticky="w")
+    ).grid(row=0, column=0, padx=5, pady=5, sticky="w")
     row += 1
 
     # Kilosort output directory
@@ -405,50 +414,57 @@ def build_tab(frame, idx):
     ).grid(row=row, column=3)
     row += 1
 
-    # Template selection sub-frame (groups the two template-subsetting filters)
-    template_frame = tk.Frame(frame, borderwidth=1, relief="sunken")
-    template_frame.grid(row=row, column=0, columnspan=4, padx=5, pady=5, sticky="w")
+    # Template filtering group
+    template_group = tk.Frame(frame)
+    template_group.grid(row=row, column=0, columnspan=4, padx=5, pady=5, sticky="w")
+    tk.Checkbutton(
+        template_group, text="Template filtering", variable=template_toggle_vars[idx],
+        command=lambda i=idx: toggle_template(i)
+    ).grid(row=0, column=0, padx=5, pady=5, sticky="w")
     row += 1
 
-    tk.Label(template_frame, text="Template Selection", font=("TkDefaultFont", 9, "bold")).grid(
-        row=0, column=0, columnspan=4, padx=5, pady=(5, 2), sticky="w"
-    )
+    template_frame = tk.Frame(template_group, borderwidth=1, relief="sunken")
+    template_frames[idx] = template_frame
 
     # Max templates (0 = use all)
     tk.Label(template_frame, text="Max templates (0 = all):").grid(
-        row=1, column=0, padx=5, pady=5, sticky="w"
+        row=0, column=0, padx=5, pady=5, sticky="w"
     )
     tk.Entry(template_frame, textvariable=max_templates_vars[idx], width=10).grid(
-        row=1, column=1, sticky="w"
+        row=0, column=1, sticky="w"
     )
     tk.Button(
         template_frame, text="?", command=lambda i=idx: show_hint("MAX_TEMPLATES"), width=3
-    ).grid(row=1, column=3)
+    ).grid(row=0, column=3)
 
     # Channel range (blank = all channels)
     tk.Label(template_frame, text="Channel range (e.g. 100-150):").grid(
-        row=2, column=0, padx=5, pady=5, sticky="w"
+        row=1, column=0, padx=5, pady=5, sticky="w"
     )
     tk.Entry(template_frame, textvariable=channel_range_vars[idx], width=10).grid(
-        row=2, column=1, sticky="w"
+        row=1, column=1, sticky="w"
     )
     tk.Button(
         template_frame, text="?", command=lambda i=idx: show_hint("CHANNEL_RANGE"), width=3
-    ).grid(row=2, column=3)
+    ).grid(row=1, column=3)
+
+    template_frame.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+    toggle_template(idx)
 
     # SDM toggle
+    sdm_group = tk.Frame(frame)
+    sdm_group.grid(row=row, column=0, columnspan=4, padx=5, pady=5, sticky="w")
     tk.Checkbutton(
-        frame, text="SDM?", variable=sdm_vars[idx],
+        sdm_group, text="SDM?", variable=sdm_vars[idx],
         command=lambda i=idx: toggle_sdm(i)
-    ).grid(row=row, column=0, columnspan=4,
-           sticky="w", padx=5, pady=5)
+    ).grid(row=0, column=0, sticky="w", padx=5, pady=5)
     tk.Button(
-        frame, text="?", command=lambda i=idx: show_hint("SDM"), width=3
-    ).grid(row=row, column=3)
+        sdm_group, text="?", command=lambda i=idx: show_hint("SDM"), width=3
+    ).grid(row=0, column=1)
     row += 1
 
     # SDM subframe
-    sdm_frame = tk.Frame(frame, borderwidth=1, relief="sunken")
+    sdm_frame = tk.Frame(sdm_group, borderwidth=1, relief="sunken")
     sdm_frames[idx] = sdm_frame
     tk.Label(sdm_frame, text="SDM IP Address:").grid(
         row=0, column=0, padx=5, pady=5
@@ -493,13 +509,11 @@ def build_tab(frame, idx):
     sdm_param_frames[idx] = param_frame
     render_processor_settings(idx)
 
-    if sdm_vars[idx].get():
-        sdm_frame.grid(row=row, column=0, columnspan=4,
-                       padx=5, pady=5)
-    row += 1
+    sdm_frame.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky="w")
+    toggle_sdm(idx)
 
     # File selection subframe
-    f_frame = tk.Frame(frame, borderwidth=1, relief="sunken")
+    f_frame = tk.Frame(rerun_group, borderwidth=1, relief="sunken")
     file_frames[idx] = f_frame
     tk.Label(f_frame, text="Recording binary file:").grid(
         row=0, column=0, padx=5, pady=5, sticky="w"
@@ -539,9 +553,8 @@ def build_tab(frame, idx):
     tk.Button(
         f_frame, text="?", command=lambda i=idx: show_hint("CHANMAP"), width=3
     ).grid(row=2, column=3)
-    if rerun_ks_vars[idx].get():
-        f_frame.grid(row=row, column=0, columnspan=4,
-                     padx=5, pady=5)
+    f_frame.grid(row=1, column=0, padx=5, pady=5, sticky="w")
+    toggle_rerun(idx)
 
 # Finish and error widgets
 def create_finish_widgets():
@@ -606,11 +619,9 @@ def main():
             meta_file_vars[i].set(state["meta_files"][i])
             chanmap_file_vars[i].set(state["chanmap_files"][i])
             rerun_ks_vars[i].set(state["rerun_flags"][i])
-            if state["rerun_flags"][i]:
-                toggle_rerun(i)
+            toggle_rerun(i)
             sdm_vars[i].set(state["sdm_flags"][i])
-            if state["sdm_flags"][i]:
-                toggle_sdm(i)
+            toggle_sdm(i)
             sdm_ip_vars[i].set(state["sdm_ips"][i])
             sdm_port_vars[i].set(state["sdm_ports"][i])
             sdm_subset_vars[i].set(state.get("sdm_subsets", [""] * num_sorters_var.get())[i])
@@ -625,6 +636,9 @@ def main():
             render_processor_settings(i)
             max_templates_vars[i].set(state.get("max_templates", ["0"] * num_sorters_var.get())[i])
             channel_range_vars[i].set(state.get("channel_ranges", [""] * num_sorters_var.get())[i])
+            flags = state.get("template_filter_flags", [])
+            template_toggle_vars[i].set(flags[i] if i < len(flags) else False)
+            toggle_template(i)
 
     create_finish_widgets()
     root.mainloop()
@@ -649,8 +663,11 @@ def run_online_multi():
     SDM_PROCESSORS = [v.get().strip() for v in sdm_processor_vars]
     SDM_PARAMS = [{proc: {k: v.get().strip() for k, v in keys.items()} for proc, keys in per.items()}
                   for per in sdm_param_vars]
-    MAX_TEMPLATES = [v.get().strip() for v in max_templates_vars]
-    CHANNEL_RANGES = [v.get().strip() for v in channel_range_vars]
+    TEMPLATE_FILTER_FLAGS = [v.get() for v in template_toggle_vars]
+    RAW_MAX_TEMPLATES = [v.get().strip() for v in max_templates_vars]
+    RAW_CHANNEL_RANGES = [v.get().strip() for v in channel_range_vars]
+    MAX_TEMPLATES = [m if on else "0" for m, on in zip(RAW_MAX_TEMPLATES, TEMPLATE_FILTER_FLAGS)]
+    CHANNEL_RANGES = [c if on else "" for c, on in zip(RAW_CHANNEL_RANGES, TEMPLATE_FILTER_FLAGS)]
     SGLX_HOST = sglx_host_var.get().strip()
     SGLX_PORT = sglx_port_var.get().strip()
     DRIFT_ENABLED = drift_enabled_var.get()
@@ -684,8 +701,9 @@ def run_online_multi():
         "sdm_trigger_bin_ms": SDM_TRIGGER_BIN_MS,
         "sdm_processors": SDM_PROCESSORS,
         "sdm_params": SDM_PARAMS,
-        "max_templates": MAX_TEMPLATES,
-        "channel_ranges": CHANNEL_RANGES
+        "template_filter_flags": TEMPLATE_FILTER_FLAGS,
+        "max_templates": RAW_MAX_TEMPLATES,
+        "channel_ranges": RAW_CHANNEL_RANGES
     }
     try:
         with open(STATE_FILE, "w") as f:

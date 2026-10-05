@@ -19,11 +19,11 @@ import json
 # -------------------------------
 STATE_FILE = Path(__file__).parent / "multi_gui_state.json"
 
-# -------------------------------
-# GUI for Multiple Sorters
-# -------------------------------
 root = tk.Tk()
 root.title("Live Spike Sorter \u2014 Configuration")
+# -------------------------------
+# GUI: Global Config
+# -------------------------------
 
 # Number of sorters
 num_sorters_var = tk.IntVar(value=1)
@@ -35,6 +35,10 @@ spin.grid(row=0, column=1, padx=5, pady=5, sticky="w")
 # stream connection for the whole process)
 sglx_host_var = tk.StringVar(value="127.0.0.1")
 sglx_port_var = tk.StringVar(value="4142")
+
+# -------------------------------
+# GUI: Per-Sorter Level Config
+# -------------------------------
 
 daq_frame = tk.Frame(root, borderwidth=1, relief="groove")
 daq_frame.grid(row=1, column=0, columnspan=4, padx=5, pady=5, sticky="w")
@@ -52,7 +56,7 @@ tk.Entry(daq_frame, textvariable=sglx_port_var, width=15).grid(row=2, column=1, 
 tk.Button(daq_frame, text="?", command=lambda: show_hint("SGLX_PORT"), width=3).grid(row=2, column=3)
 
 # Drift-correction parameters (shared across all sorters)
-drift_enabled_var = tk.BooleanVar(value=False)
+drift_enabled_var = tk.BooleanVar(value=True)
 drift_window_var = tk.StringVar(value="10")
 drift_max_shift_var = tk.StringVar(value="50")
 drift_retrain_threshold_var = tk.StringVar(value="50")
@@ -332,7 +336,7 @@ def update_tabs():
 
     # Append new entries if increasing
     for i in range(old, n):
-        rerun_ks_vars.append(tk.BooleanVar(value=False))
+        rerun_ks_vars.append(tk.BooleanVar(value=True))
         base_path_vars.append(tk.StringVar(value=str(Path.home())))
         ks_output_dir_vars.append(tk.StringVar(value=""))
         bin_file_vars.append(tk.StringVar(value=""))

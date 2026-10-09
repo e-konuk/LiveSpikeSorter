@@ -43,6 +43,7 @@ assert HEADER.size == 48 and RECORD.itemsize == 16
 @dataclass
 class Batch:
     sorter: int
+    probe: int        # imec probe the sorter reads (imecN); 0 from builds before multi-probe
     seq: int          # increments once per sorter batch; gaps = dropped packets
     part: int
     n_parts: int
@@ -58,11 +59,11 @@ def parse(buf):
     if len(buf) < HEADER.size:
         return None
     (magic, version, sorter, seq, part, n_parts,
-     start, end, sent_us, process_us, n, _reserved) = HEADER.unpack_from(buf)
+     start, end, sent_us, process_us, n, probe) = HEADER.unpack_from(buf)
     if magic != MAGIC or version != VERSION or len(buf) < HEADER.size + n * RECORD.itemsize:
         return None
     spikes = np.frombuffer(buf, RECORD, count=n, offset=HEADER.size)
-    return Batch(sorter, seq, part, n_parts, start, end, sent_us, process_us, spikes)
+    return Batch(sorter, probe, seq, part, n_parts, start, end, sent_us, process_us, spikes)
 
 
 def listen(port=9100, host="0.0.0.0", timeout=None):
@@ -139,6 +140,7 @@ def _main():
     print(f"Listening on {args.host}:{args.port} ... (Ctrl+C to stop"
           f"{' and verify' if args.verify else ''})")
     last_seq = {}
+    probe_of = {}     # sorter -> imec probe
     n_batches = n_spikes = n_dropped = 0
     proc_us, lat_us = [], []
     kept = []
@@ -165,11 +167,13 @@ def _main():
                 if prev is not None and b.seq > prev + 1:
                     n_dropped += b.seq - prev - 1
                 last_seq[b.sorter] = b.seq
+                probe_of[b.sorter] = b.probe
             if time.monotonic() >= t_report:
                 lat_ms = np.median(lat_us) / 1000
                 # Only trust it if the two clocks evidently agree (not true on macOS, for one).
                 lat_txt = f"{lat_ms:.2f} ms" if 0 <= lat_ms < 1000 else "n/a (clocks differ)"
-                print(f"sorter(s) {sorted(last_seq)}  batches/s {n_batches:4d}  spikes/s {n_spikes:6d}  "
+                srcs = ", ".join(f"{s}:imec{probe_of[s]}" for s in sorted(last_seq))
+                print(f"sorter(s) {srcs}  batches/s {n_batches:4d}  spikes/s {n_spikes:6d}  "
                       f"dropped (total) {n_dropped}  stream end {b.end}  "
                       f"median process {np.median(proc_us) / 1000 if proc_us else float('nan'):.1f} ms  "
                       f"median send->recv {lat_txt}")

@@ -31,7 +31,7 @@ struct SpikeStreamHeader {
 	uint64_t sendTimeUs;        // std::chrono::steady_clock (QueryPerformanceCounter on Windows)
 	uint32_t processTimeUs;     // sorter compute time for this batch
 	uint16_t nRecords;          // records in THIS datagram
-	uint16_t reserved;
+	uint16_t probe;             // imec probe this sorter reads N = imecN (default was 0)
 };
 static_assert(sizeof(SpikeStreamHeader) == 48, "SpikeStreamHeader wire size changed");
 
@@ -47,9 +47,8 @@ public:
 	SpikeStream();
 	~SpikeStream();
 
-	// hostPort = "127.0.0.1:9100". Empty string leaves the stream disabled.
 	// Returns false (and stays disabled) on a malformed or unresolvable address.
-	bool open(const std::string& hostPort, uint16_t sorterId);
+	bool open(const std::string& hostPort, uint16_t sorterId, uint16_t probe = 0);
 	bool isEnabled() const { return m_enabled; }
 
 	void sendBatch(const std::vector<long>& times,
@@ -65,6 +64,7 @@ private:
 	uint32_t  m_dstAddr;        // network byte order
 	uint16_t  m_dstPort;        // network byte order
 	uint16_t  m_sorterId;
+	uint16_t  m_probe;
 	uint32_t  m_batchSeq;
 	uint64_t  m_sendErrors;
 	std::vector<char> m_buf;

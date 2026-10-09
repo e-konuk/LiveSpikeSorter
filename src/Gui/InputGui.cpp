@@ -73,6 +73,7 @@ InputGUI::InputGUI(InputParameters cmdLineParams)
 	Params.mapDecoderInputFolders = cmdLineParams.mapDecoderInputFolders;
 	Params.mapSpikeFiles = cmdLineParams.mapSpikeFiles;
 	Params.mapOSSOutputFolders = cmdLineParams.mapOSSOutputFolders;
+	Params.mapDeviceSubstreams = cmdLineParams.mapDeviceSubstreams;
 
 	/* Fill in missing keys (if any) */
 	auto ensure_key = [&](auto& m, const std::string& def_val)
@@ -113,13 +114,13 @@ InputGUI::InputGUI(InputParameters cmdLineParams)
 	Params.iConvolutionTimes = 2; // remove, no longer needed
 	Params.iDownsampling = 1; // remove, no longer needed
 	Params.iMaxIts = 150; // remove, no longer needed
-	Params.iTimeBehind = 0;
+	Params.iTimeBehind = cmdLineParams.iTimeBehind;
 	Params.iAvgWindowTime = 5000;
 	Params.iRedundancy = 7;
 	Params.iSorterType = 0;
 	Params.iNumTemplates = 300;
 
-	Params.bSmallskip = false;
+	Params.bSmallskip = cmdLineParams.bSmallskip;
 	Params.bReadFromFile = false;
 	Params.bIsDecoding = false;
 	Params.bIsSendingFeedback = false;
@@ -250,9 +251,21 @@ void InputGUI::gatherDataAccquisitionParameters() {
 		ImGui::InputInt("##Port", &temp2, 1, 100, 0);
 		Params.uDataAccquisitionPort = temp2;
 
-		ImGui::Text("Substream:"); ImGui::SameLine();
-		HelpMarker("What imec-probe are you using? E.g. if using imec4, set substream as 4");
-		ImGui::InputInt("##Substream", &Params.iSubstream);
+		// Mapping sorter to probe with multipule GPU
+		if (Params.vSelectedDevices.size() <= 1) {
+			ImGui::Text("Substream:"); ImGui::SameLine();
+			HelpMarker("What imec-probe are you using? E.g. if using imec4, set substream as 4");
+			if (!Params.vSelectedDevices.empty()) {
+				auto it = Params.mapDeviceSubstreams.find(Params.vSelectedDevices[0]);
+				if (it != Params.mapDeviceSubstreams.end())
+					Params.iSubstream = it->second;
+				ImGui::InputInt("##Substream", &Params.iSubstream);
+				Params.mapDeviceSubstreams[Params.vSelectedDevices[0]] = Params.iSubstream;
+			}
+			else {
+				ImGui::InputInt("##Substream", &Params.iSubstream);
+			}
+		}
 	}
 }
 
@@ -382,6 +395,15 @@ void InputGUI::gatherParallelizedOSSInputs() {
 				}
 			}
 			HelpMarker("Folder containing the templates.npy, whitening_mat.npy, and channel_map.npy files.");
+
+			std::string probeLabel = "Probe (imecN) for Device " + std::to_string(Params.vSelectedDevices[i]) + ": ";
+			ImGui::Text(probeLabel.c_str()); ImGui::SameLine();
+			auto it = Params.mapDeviceSubstreams.find(Params.vSelectedDevices[i]);
+			int probe = (it != Params.mapDeviceSubstreams.end()) ? it->second : Params.iSubstream;
+			ImGui::PushItemWidth(100);
+			ImGui::InputInt(("##Probe" + std::to_string(i)).c_str(), &probe);
+			ImGui::PopItemWidth();
+			Params.mapDeviceSubstreams[Params.vSelectedDevices[i]] = probe;
 		}
 	}
 }

@@ -58,7 +58,6 @@ public:
 
 protected:
 	// Short vector data buffers
-	std::vector<short>	m_sFetchBuffer;
 	std::vector<short>	m_sNidqBuffer;
 
 	// Max and min window size

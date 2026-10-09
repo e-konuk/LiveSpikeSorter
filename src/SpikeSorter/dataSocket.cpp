@@ -20,6 +20,9 @@
 
 static std::mutex sglxMutex;
 
+// Per-thread fetch buffer
+static thread_local std::vector<short> tl_fetchBuffer;
+
 // ------------------------------------------------------------------------------
 //
 // Name			: StreamDataSocket::StreamDataSocket()
@@ -138,11 +141,9 @@ t_ull StreamDataSocket::fetchLatest(float *fData, OSSSpecificParams osParams, t_
 	}
 
 	lStartCt = lLatestCt - lToGet;
-	lLatestCt = fetch(m_sFetchBuffer, S, IMEC, osParams.substream, lStartCt, lToGet, osParams.vImecChannels);
-
-	//Fill fData with m_sFetchBuffer's contents
+	lLatestCt = fetch(tl_fetchBuffer, S, IMEC, osParams.substream, lStartCt, lToGet, osParams.vImecChannels);
 	for (long lI = 0; lI < lToGet * osParams.lNChans; lI++) {
-		fData[lI] = (float)m_sFetchBuffer[lI];
+		fData[lI] = (float)tl_fetchBuffer[lI];
 	}
 	return lLatestCt;
 }
@@ -163,11 +164,9 @@ t_ull StreamDataSocket::fetchLatest_TC(float *fData, OSSSpecificParams osParams,
 		lStartCt = lLatestCt - m_lMaxSize;
 	}
 
-	lLatestCt = fetch(m_sFetchBuffer, S, IMEC, osParams.substream, lStartCt, lToGet, osParams.vImecChannels);
-
-	//Fill fData with m_sFetchBuffer's contents
+	lLatestCt = fetch(tl_fetchBuffer, S, IMEC, osParams.substream, lStartCt, lToGet, osParams.vImecChannels);
 	for (long lI = 0; lI < lToGet * osParams.lNChans; lI++)
-		fData[lI] = (float)m_sFetchBuffer[lI];
+		fData[lI] = (float)tl_fetchBuffer[lI];
 
 	//std::cout << "number of samples: " << lToGet << std::endl;
 	//std::cout << "number of channels: " << m_lNChans << std::endl;
@@ -183,11 +182,9 @@ t_ull StreamDataSocket::fetchFromPlace(float *fData, OSSSpecificParams osParams,
 	// Limit the fetch amount to the max size
 	t_ull lToGet = min(m_lMaxSize, lLatestCt - lStartCt);
 
-	lLatestCt = fetch(m_sFetchBuffer, S, IMEC, osParams.substream, lStartCt, lToGet, osParams.vImecChannels);
-
-	//Fill data buffer with m_sFetchBuffer
+	lLatestCt = fetch(tl_fetchBuffer, S, IMEC, osParams.substream, lStartCt, lToGet, osParams.vImecChannels);
 	for (long lI = 0; lI < lToGet * osParams.lNChans; lI++)
-		fData[lI] = (float)m_sFetchBuffer[lI];
+		fData[lI] = (float)tl_fetchBuffer[lI];
 
 	return lLatestCt;
 }

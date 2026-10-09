@@ -83,6 +83,9 @@ void runSorter(sockaddr_in mainAddr, InputParameters params, DataSocket** &mNC) 
 			ossParams.uSelectedDevice = deviceIndex;
 			ossParams.sInputFolder = params.mapDeviceFilePaths[deviceIndex];
 			ossParams.sOSSOutputFolder = params.mapOSSOutputFolders[deviceIndex];
+			auto sub = params.mapDeviceSubstreams.find(deviceIndex);
+			ossParams.iSubstream = (sub != params.mapDeviceSubstreams.end()) ? sub->second : params.iSubstream;
+			std::cout << "GPU " << deviceIndex << " sorts imec" << ossParams.iSubstream << std::endl;
 			std::cout << "Setting LSS output folder to " << params.mapOSSOutputFolders[deviceIndex];
 			std::thread ossThread = std::thread(runOSSParallel, mainAddr, ossParams, sharedSocket);
 			ossThread.detach();
@@ -241,6 +244,16 @@ InputParameters parseCmdArgs(int argc, char* argv[]) {
 			}
 			cmdLineParams.sSpikeStreamAddr = argv[i + 1];
 		}
+		else if (arg == "--max_lag_ms") {
+			if (i + 1 >= argc) {
+				std::cout << "Must supply a number of milliseconds after --max_lag_ms" << std::endl;
+				exit(EXIT_SUCCESS);
+			}
+			cmdLineParams.iTimeBehind = std::stoi(argv[i + 1]);
+		}
+		else if (arg == "--small_skip") {
+			cmdLineParams.bSmallskip = true;
+		}
 		else if (arg == "--no_input_gui") {
 			cmdLineParams.bSkipInputGui = true;
 		}
@@ -340,6 +353,16 @@ InputParameters parseCmdArgs(int argc, char* argv[]) {
 				}
 
 				cmdLineParams.mapSpikeFiles[cmdLineParams.vSelectedDevices[j]] = argv[i + j + 1];
+			}
+		}
+		else if (arg == "--substream") {
+			for (int j = 0; j < cmdLineParams.vSelectedDevices.size(); j++) {
+				std::string val = (i + j + 1 < argc) ? argv[i + j + 1] : "--";
+				if (val.length() >= 2 && val.substr(0, 2) == "--") {
+					std::cout << "Not enough values provided for --substream compared to --n_gpus. Remaining sorters read imec0." << std::endl;
+					break;
+				}
+				cmdLineParams.mapDeviceSubstreams[cmdLineParams.vSelectedDevices[j]] = std::stoi(val);
 			}
 		}
 		else if (arg == "--cuda_output_dir") {

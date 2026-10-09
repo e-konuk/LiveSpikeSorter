@@ -1,5 +1,5 @@
 {
-    "num_sorters": 1,
+    "num_sorters": 2,
     "sglx_host": "127.0.0.1",
     "sglx_port": "4142",
     "drift_enabled": true,
@@ -8,40 +8,58 @@
     "drift_retrain_threshold_um": "50",
     "spike_stream_enabled": false,
     "spike_stream_addr": "127.0.0.1:9100",
+    "max_lag_ms": "0",
+    "small_skip": false,
     "base_paths": [
-        ""
+        ".",
+        "C:\\Users\\moorelab"
     ],
     "ks_output_dirs": [
-        ""
+        ".",
+        "."
     ],
     "bin_files": [
-        ""
+        ".",
+        "."
     ],
     "meta_files": [
-        ""
+        ".",
+        "."
     ],
     "chanmap_files": [
-        ""
+        ".",
+        "."
+    ],
+    "substreams": [
+        "0",
+        "1"
     ],
     "rerun_flags": [
-        true
+        false,
+        false
     ],
     "sdm_flags": [
+        false,
         false
     ],
     "sdm_ips": [
-        "192.168.10.1"
+        "192.168.10.1",
+        ""
     ],
     "sdm_ports": [
-        "9999"
+        "9999",
+        ""
     ],
     "sdm_subsets": [
+        "",
         ""
     ],
     "sdm_trigger_bin_ms": [
+        "100",
         "100"
     ],
     "sdm_processors": [
+        "zscore",
         "zscore"
     ],
     "sdm_params": [
@@ -69,15 +87,43 @@
                 "rs_z_high": "1",
                 "boundary_us": "200"
             }
+        },
+        {
+            "zscore": {
+                "trigger_z": "1.0",
+                "baseline_min_seconds": "10.0"
+            },
+            "logreg": {
+                "spikes_file": "",
+                "event_file": "",
+                "work_folder": "",
+                "window_ms": "300"
+            },
+            "bincounts": {},
+            "closedloop": {
+                "mode": "median",
+                "fs_offset_low": "0",
+                "fs_offset_high": "0",
+                "rs_offset_low": "0",
+                "rs_offset_high": "0",
+                "fs_z_low": "1.0",
+                "fs_z_high": "1.0",
+                "rs_z_low": "1.0",
+                "rs_z_high": "1.0",
+                "boundary_us": "200"
+            }
         }
     ],
     "template_filter_flags": [
+        false,
         false
     ],
     "max_templates": [
+        "0",
         "0"
     ],
     "channel_ranges": [
+        "",
         ""
     ]
 }

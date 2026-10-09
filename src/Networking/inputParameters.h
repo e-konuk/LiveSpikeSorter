@@ -35,6 +35,9 @@ struct InputParameters {
 								mapDecoderInputFolders,
 								mapSpikeFiles;
 
+	// imec probe substream: substream N = imecN
+	std::map<uint16, int>		mapDeviceSubstreams;
+
 	double						dTau,
 								dThreshold,
 								dRatioToMax;
@@ -55,7 +58,7 @@ struct InputParameters {
 								iConvolutionTimes,
 								iDownsampling,
 								iMaxIts,
-								iTimeBehind,
+								iTimeBehind{ 0 },     // Allowed lag
 								iAvgWindowTime,
 								iRedundancy,
 								iWindowLength,
@@ -67,8 +70,7 @@ struct InputParameters {
 	bool						bReadFromFile,
 								bIsDecoding,
 								bIsSendingFeedback,
-								bSmallskip;
-
+								bSmallskip{ false };  // when lag exceeds iTimeBehind: skip only to the lag limit
 	uint16_t					sdmPort{};
 
 	// Skip the ImGui input window and use CLI-populated params directly

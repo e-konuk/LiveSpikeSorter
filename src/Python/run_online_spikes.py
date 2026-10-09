@@ -102,6 +102,24 @@ tk.Button(stream_frame, text="?", command=lambda: show_hint("SPIKE_STREAM"), wid
 tk.Label(stream_frame, text="host:port:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
 tk.Entry(stream_frame, textvariable=spike_stream_addr_var, width=18).grid(row=2, column=1, sticky="w")
 
+# Backlog / skip handling (shared across all sorters)
+max_lag_var = tk.StringVar(value="0")
+small_skip_var = tk.BooleanVar(value=False)
+
+latency_frame = tk.Frame(root, borderwidth=1, relief="groove")
+latency_frame.grid(row=1, column=12, columnspan=4, padx=5, pady=5, sticky="nw")
+
+tk.Label(latency_frame, text="Latency (shared)", font=("TkDefaultFont", 9, "bold")).grid(
+    row=0, column=0, columnspan=4, padx=5, pady=(5, 2), sticky="w"
+)
+tk.Label(latency_frame, text="Max lag (ms, 0 = skip):").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+tk.Entry(latency_frame, textvariable=max_lag_var, width=10).grid(row=1, column=1, sticky="w")
+tk.Button(latency_frame, text="?", command=lambda: show_hint("MAX_LAG"), width=3).grid(row=1, column=3)
+tk.Checkbutton(latency_frame, text="Small skip", variable=small_skip_var).grid(
+    row=2, column=0, columnspan=2, padx=5, pady=5, sticky="w"
+)
+tk.Button(latency_frame, text="?", command=lambda: show_hint("SMALL_SKIP"), width=3).grid(row=2, column=3)
+
 # Notebook for sorter tabs
 toolkit = ttk.Notebook(root)
 toolkit.grid(row=2, column=0, columnspan=4, padx=5, pady=5, sticky="nsew")
@@ -117,6 +135,7 @@ sdm_param_vars = []
 sdm_param_frames = []       # per sorter: the frame holding the selected processor's widgets
 sdm_when_widgets = {}       # sorter idx -> [(Param, Entry)] for enabling fields by `when`
 template_toggle_vars = []
+probe_vars = []            # per sorter: imec probe (SpikeGLX substream) it sorts
 max_templates_vars = []
 channel_range_vars = []
 template_frames, file_frames, sdm_frames = [], [], []
@@ -184,7 +203,25 @@ HINTS = {
                      "127.0.0.1:9100 = a script on this machine. Fire-and-forget: "
                      "a missing receiver is harmless. Receiver + packet format: "
                      "src/Python/lss_stream.py. Shared by all sorters (packets "
-                     "carry a sorter id)."),
+                     "carry a sorter id and imec probe number); "
+                     "src/Python/multi_probe_receiver.py combines probes."),
+    "PROBE": ("Which imec probe this sorter reads from SpikeGLX: N = imecN "
+              "(the number in the probe's .imecN.ap.bin file name)."
+              "Every sorter needs its own GPU. Each sorter must use "
+              "templates trained on its own probe's recording. Spike stream packets "
+              "carry this number, so one receiver can combine probes."),
+    "MAX_LAG": ("What to do when a batch takes longer than real time and "
+                "unprocessed data (> 50 ms) piles up in SpikeGLX's buffer. "
+                "0 (default): drop the backlog and skip to latest batch"
+                "(lowest latency, but data loss) "
+                "N > 0: keep sorting from the oldest unprocessed sample and catch "
+                "up over later batches; only skip once the sorter is more than N ms "
+                "behind. "
+                "Shared by all sorters."),
+    "SMALL_SKIP": ("Only needed when Max lag > 0. When the lag limit is exceeded: "
+                   "checked = skip just far enough to be back at the limit (drops "
+                   "less data, stays ~Max lag behind); unchecked = skip all the way "
+                   "to the newest data."),
 }
 
 def show_hint(key):
@@ -317,6 +354,21 @@ def toggle_rerun(idx):
     if rerun_ks_vars[idx].get(): file_frames[idx].grid()
     else: file_frames[idx].grid_remove()
 
+def refresh_tab_labels(*_):
+    for i, tab in enumerate(toolkit.tabs()):
+        if i < len(probe_vars):
+            toolkit.tab(tab, text=f"Sorter {i+1} \u00b7 imec{probe_vars[i].get().strip()} \u00b7 GPU {i}")
+
+def detected_gpu_count():
+    """Number of NVIDIA GPUs per nvidia-smi, or None if it can't be run."""
+    try:
+        out = subprocess.run(["nvidia-smi", "-L"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    return sum(1 for line in out.stdout.splitlines() if line.startswith("GPU "))
+
 def toggle_template(idx):
     if template_toggle_vars[idx].get(): template_frames[idx].grid()
     else: template_frames[idx].grid_remove()
@@ -337,7 +389,7 @@ def update_tabs():
                     sdm_subset_vars, sdm_trigger_bin_ms_vars,
                     sdm_processor_vars, sdm_param_vars, sdm_param_frames,
                     template_toggle_vars, max_templates_vars, channel_range_vars,
-                    template_frames, file_frames, sdm_frames):
+                    template_frames, file_frames, sdm_frames, probe_vars):
             del lst[n:]
 
     # Append new entries if increasing
@@ -358,6 +410,8 @@ def update_tabs():
                                for proc, vals in default_values().items()})
         sdm_param_frames.append(None)
         template_toggle_vars.append(tk.BooleanVar(value=False))
+        probe_vars.append(tk.StringVar(value=str(i)))  
+        probe_vars[-1].trace_add("write", refresh_tab_labels)
         max_templates_vars.append(tk.StringVar(value="0"))
         channel_range_vars.append(tk.StringVar(value=""))
         template_frames.append(None)
@@ -371,10 +425,22 @@ def update_tabs():
         frame = ttk.Frame(toolkit)
         toolkit.add(frame, text=f"Sorter {i+1}")
         build_tab(frame, i)
+    refresh_tab_labels()
 
 # Construct UI for a single sorter tab
 def build_tab(frame, idx):
     row = 0
+    probe_group = tk.Frame(frame)
+    probe_group.grid(row=row, column=0, columnspan=4, padx=5, pady=5, sticky="w")
+    tk.Label(probe_group, text="Probe (imecN):").grid(row=0, column=0, padx=5, sticky="w")
+    probe = probe_vars[idx].get() 
+    tk.Spinbox(probe_group, from_=0, to=31, textvariable=probe_vars[idx], width=4).grid(
+        row=0, column=1, sticky="w"
+    )
+    probe_vars[idx].set(probe)
+    tk.Button(probe_group, text="?", command=lambda: show_hint("PROBE"), width=3).grid(row=0, column=2, padx=5)
+    row += 1
+
     # Rerun group: checkbox plus the file paths it reveals
     rerun_group = tk.Frame(frame)
     rerun_group.grid(row=row, column=0, columnspan=4, padx=5, pady=5, sticky="w")
@@ -567,7 +633,41 @@ def create_finish_widgets():
 
 # Destroy GUI on finish
 def finish_and_quit():
+    lag = max_lag_var.get().strip() or "0"
+    if not lag.isdigit():
+        messagebox.showerror("Invalid setting", f"Max lag must be a whole number of ms >= 0 (got '{lag}').")
+        return
+    if not check_probes():
+        return
     root.destroy()
+
+def check_probes():
+    """Per-sorter probe sanity checks before launch. False = stay in the GUI."""
+    n = num_sorters_var.get()
+    probes = [v.get().strip() for v in probe_vars[:n]]
+    bad = [f"Sorter {i+1}: '{p}'" for i, p in enumerate(probes) if not p.isdigit()]
+    if bad:
+        messagebox.showerror("Invalid probe", "Probe must be a whole number >= 0.\n" + "\n".join(bad))
+        return False
+
+    gpus = detected_gpu_count()
+    if gpus is not None and n > gpus:
+        messagebox.showerror("Not enough GPUs",
+                             f"{n} sorters need {n} GPUs (one each), but nvidia-smi lists {gpus}.")
+        return False
+
+    warnings = []
+    for p in sorted(set(probes)):
+        users = [i + 1 for i, q in enumerate(probes) if q == p]
+        if len(users) > 1:
+            warnings.append(f"Sorters {', '.join(map(str, users))} all read imec{p}.")
+    for i in range(n):
+        name = Path(bin_file_vars[i].get().strip()).name
+        if rerun_ks_vars[i].get() and ".imec" in name and f".imec{probes[i]}." not in name:
+            warnings.append(f"Sorter {i+1} reads imec{probes[i]} but trains on {name}.")
+    if warnings:
+        return messagebox.askyesno("Check probe selection", "\n".join(warnings) + "\n\nLaunch anyway?")
+    return True
 
 def legacy_sdm_params(state, i):
     """Processor settings from a multi_gui_state.json written before sdm_processors.py
@@ -604,6 +704,8 @@ def main():
             drift_retrain_threshold_var.set(state.get("drift_retrain_threshold_um", drift_retrain_threshold_var.get()))
             spike_stream_enabled_var.set(state.get("spike_stream_enabled", spike_stream_enabled_var.get()))
             spike_stream_addr_var.set(state.get("spike_stream_addr", spike_stream_addr_var.get()))
+            max_lag_var.set(state.get("max_lag_ms", max_lag_var.get()))
+            small_skip_var.set(state.get("small_skip", small_skip_var.get()))
         except Exception as e:
             print(f"Could not load GUI state: {e}")
 
@@ -639,6 +741,8 @@ def main():
             flags = state.get("template_filter_flags", [])
             template_toggle_vars[i].set(flags[i] if i < len(flags) else False)
             toggle_template(i)
+            probes = state.get("substreams", [])
+            probe_vars[i].set(probes[i] if i < len(probes) else str(i))
 
     create_finish_widgets()
     root.mainloop()
@@ -655,6 +759,7 @@ def run_online_multi():
     META_FILES = [Path(v.get().strip()) for v in meta_file_vars]
     CHANMAP_FILES = [Path(v.get().strip()) for v in chanmap_file_vars]
     RERUN_FLAGS = [v.get() for v in rerun_ks_vars]
+    PROBES = [v.get().strip() for v in probe_vars]
     SDM_FLAGS = [v.get() for v in sdm_vars]
     SDM_IPS = [v.get().strip() for v in sdm_ip_vars]
     SDM_PORTS = [v.get().strip() for v in sdm_port_vars]
@@ -676,6 +781,8 @@ def run_online_multi():
     DRIFT_RETRAIN_THRESHOLD_UM = drift_retrain_threshold_var.get().strip()
     SPIKE_STREAM_ENABLED = spike_stream_enabled_var.get()
     SPIKE_STREAM_ADDR = spike_stream_addr_var.get().strip()
+    MAX_LAG_MS = max_lag_var.get().strip() or "0"
+    SMALL_SKIP = small_skip_var.get()
 
     # Save current state
     state = {
@@ -688,11 +795,14 @@ def run_online_multi():
         "drift_retrain_threshold_um": DRIFT_RETRAIN_THRESHOLD_UM,
         "spike_stream_enabled": SPIKE_STREAM_ENABLED,
         "spike_stream_addr": SPIKE_STREAM_ADDR,
+        "max_lag_ms": MAX_LAG_MS,
+        "small_skip": SMALL_SKIP,
         "base_paths": [str(p) for p in BASE_PATHS],
         "ks_output_dirs": [str(d) for d in KS_OUTPUT_DIRS],
         "bin_files": [str(p) for p in BIN_FILES],
         "meta_files": [str(p) for p in META_FILES],
         "chanmap_files": [str(p) for p in CHANMAP_FILES],
+        "substreams": PROBES,
         "rerun_flags": RERUN_FLAGS,
         "sdm_flags": SDM_FLAGS,
         "sdm_ips": SDM_IPS,
@@ -733,6 +843,7 @@ def run_online_multi():
 
     arguments = {
         '--n_gpus': str(n),
+        '--substream': PROBES,
         '--oss_input': OSS_DIRS,
         '--decoder_input': [str(d) + '\\' for d in decoder_input_dirs],
         '--spikes_output': [str(d / 'spikeOutput.txt') for d in decoder_input_dirs],
@@ -780,6 +891,8 @@ def run_online_multi():
     if SPIKE_STREAM_ENABLED and SPIKE_STREAM_ADDR:
         arguments['--spike_stream'] = SPIKE_STREAM_ADDR
 
+    arguments['--max_lag_ms'] = MAX_LAG_MS
+
     script_dir = pathlib.Path(__file__).parent.resolve()
     # Go back exactly two levels to reach the project root and build path to executable 
     exe_path = script_dir.parent.parent / "x64" / "RELEASE" / "OnlineSpikes.exe"
@@ -794,6 +907,8 @@ def run_online_multi():
     cmd.append('--no_input_gui')
     if DRIFT_ENABLED:
         cmd.append('--drift_estimation')
+    if SMALL_SKIP:
+        cmd.append('--small_skip')
 
     # RETRAIN loop
     while True:

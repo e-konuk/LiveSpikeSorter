@@ -281,7 +281,7 @@ OnlineSpikesV2::OnlineSpikesV2(
 
 	initializeSorter(params);
 	establishDecoderConnection(mainAddr);
-	spikeStream.open(params.sSpikeStreamAddr, params.uSelectedDevice);
+	spikeStream.open(params.sSpikeStreamAddr, params.uSelectedDevice, static_cast<uint16_t>(params.iSubstream));
 }
 
 OnlineSpikesV2::~OnlineSpikesV2()

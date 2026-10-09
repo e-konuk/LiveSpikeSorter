@@ -30,7 +30,7 @@ typedef int ss_socket_t;
 
 SpikeStream::SpikeStream()
 	: m_enabled(false), m_sock(SS_INVALID), m_dstAddr(0), m_dstPort(0),
-	m_sorterId(0), m_batchSeq(0), m_sendErrors(0)
+	m_sorterId(0), m_probe(0), m_batchSeq(0), m_sendErrors(0)
 {
 	m_buf.resize(sizeof(SpikeStreamHeader) + SPIKE_STREAM_MAX_RECORDS * sizeof(SpikeStreamRecord));
 }
@@ -45,7 +45,7 @@ SpikeStream::~SpikeStream()
 #endif
 }
 
-bool SpikeStream::open(const std::string& hostPort, uint16_t sorterId)
+bool SpikeStream::open(const std::string& hostPort, uint16_t sorterId, uint16_t probe)
 {
 	if (hostPort.empty())
 		return false;
@@ -100,8 +100,9 @@ bool SpikeStream::open(const std::string& hostPort, uint16_t sorterId)
 	m_dstAddr = addr;
 	m_dstPort = htons(static_cast<uint16_t>(port));
 	m_sorterId = sorterId;
+	m_probe = probe;
 	m_enabled = true;
-	std::cout << "[SpikeStream] Sorter " << sorterId << " streaming spikes to " << host << ":" << port << std::endl;
+	std::cout << "[SpikeStream] Sorter " << sorterId << " (imec" << probe << ") streaming spikes to " << host << ":" << port << std::endl;
 	return true;
 }
 
@@ -123,6 +124,7 @@ void SpikeStream::sendBatch(const std::vector<long>& times,
 	hdr.magic = SPIKE_STREAM_MAGIC;
 	hdr.version = SPIKE_STREAM_VERSION;
 	hdr.sorterId = m_sorterId;
+	hdr.probe = m_probe;
 	hdr.batchSeq = m_batchSeq++;
 	hdr.nParts = static_cast<uint16_t>(nParts);
 	hdr.batchStartSample = batchStartSample;

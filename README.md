@@ -20,6 +20,9 @@ Live Spike Sorter (LSS) is a GPU-accelerated real-time spike sorter for extracel
 | **Python** | 3.10 |
 | **SpikeGLX** | Latest release |
 | **Kilosort4** | 4.0.13 — patched fork at `External/Kilosort/` |
+| **CPU** | Your processor should not be a bottleneck so long as your device [can run Kilosort](https://kilosort.readthedocs.io/en/latest/hardware.html). If SpikeGLX aquistion is also on the same machine, we refer to their [hardware requirements](https://github.com/billkarsh/SpikeGLX/blob/master/Markdown/SystemRequirements_PXI.md)
+| **RAM** | Same as above
+
 
 ## Building from Source
 
@@ -48,12 +51,15 @@ python src/Python/run_online_spikes.py
 The GUI lets you configure one or more sorter instances, select Kilosort output directories, and optionally re-run Kilosort4 before launching LSS. You must run Kilosort4 on a short recording (10–20 minutes) to generate templates, the whitening matrix, drift matrices, and other tensors that LSS needs at runtime.
 
 
-## Real-Time Decoding
+## Real-Time Output
 
-LSS includes an optional real-time decoder that trains a classifier on spike data collected during an initial recording session. To use it:
+The SDM (Stimulus Display Machine) integration sends a per-bin summary of spiking to a separate machine for closed-loop stimulus control. What gets sent depends on the processor selected in the launcher: 
 
-1. Run LSS without the decoder enabled for 10–20 minutes to produce a `spikeOutput.txt` file.  
-2. Re-launch LSS with decoding enabled, pointing the decoder at the collected spike data and an event file for training labels.  
-3. The decoder will train online and begin producing predictions in real time.
+1. Z-score firing trigger 
+2. Logistic regression decoder trained on a previous session's `spikeOutput.txt` and event file
+3. Raw per-neuron bin counts (TCP)
+4. FS/RS custom stimulus trigger (used in our paper's closed-loop demo experiment). 
 
-The SDM (Stimulus Display Machine) integration allows LSS to send decoded output over TCP to a separate machine for closed-loop stimulus control.  
+All except bin counts are sent over UDP. Overall functionality is limited.
+
+For other custom use cases, the spike streams can be networked via UDP, configurable under "Spike Stream" in the launcher. When enabled, each sorted spike is sent as soon as its batch is processed. A receiver can parse these packets using your preferred interface ([Python example](src/Python/lss_receiver.py)).

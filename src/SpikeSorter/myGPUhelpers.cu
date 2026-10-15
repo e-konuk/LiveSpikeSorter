@@ -513,6 +513,51 @@ __global__ void median_remove_kernel(float* __restrict__ data, int C, int W)
 	}
 }
 
+// Grouped CAR
+__global__ void grouped_median_remove_kernel(float* __restrict__ data, int C, int W,
+	const int* __restrict__ offsets, const int* __restrict__ members)
+{
+	extern __shared__ float s_sort[];
+
+	int t = blockIdx.x;
+	int g = blockIdx.y;
+	if (t >= W)
+		return;
+
+	int tid = threadIdx.x;
+	int sortLen = blockDim.x;
+	int start = offsets[g];
+	int n = offsets[g + 1] - start;
+
+	int chan = (tid < n) ? members[start + tid] : -1;
+	float x = (tid < n) ? data[chan + t * C] : CUDART_INF_F;
+	s_sort[tid] = x;
+	__syncthreads();
+
+	// bitonic sort, padding empty entries
+	for (int k = 2; k <= sortLen; k *= 2) {
+		for (int j = k / 2; j > 0; j /= 2) {
+			int ixj = tid ^ j;
+			if (ixj > tid) {
+				bool ascending = ((tid & k) == 0);
+				float a = s_sort[tid];
+				float b = s_sort[ixj];
+				if ((ascending && a > b) || (!ascending && a < b)) {
+					s_sort[tid] = b;
+					s_sort[ixj] = a;
+				}
+			}
+			__syncthreads();
+		}
+	}
+
+	// Lower median, same as median_remove_kernel
+	float median = (n & 1) ? s_sort[n / 2] : s_sort[(n - 1) / 2];
+
+	if (tid < n)
+		data[chan + t * C] = x - median;
+}
+
 __global__ void reciprocal_kernel(float* d_A, int len)
 {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -940,6 +985,16 @@ void medianRemove(float* data, int C, int currBatchNumSamples) {
 	int blockSize = MAX_CHANNELS; // algorithm operates on fixed number of entries
 	int numBlocks = currBatchNumSamples;
 	median_remove_kernel << <numBlocks, blockSize >> > (data, C, currBatchNumSamples);
+	_CUDA_CALL(cudaDeviceSynchronize());
+}
+
+void groupedMedianRemove(float* data, int C, int currBatchNumSamples,
+	const int* d_groupOffsets, const int* d_groupMembers, int numGroups, int sortLen) {
+	static const char* ptLabel = { "myGPUHelpers::groupedMedianRemove" };
+
+	dim3 grid(currBatchNumSamples, numGroups);
+	grouped_median_remove_kernel << <grid, sortLen, sortLen * sizeof(float) >> > (
+		data, C, currBatchNumSamples, d_groupOffsets, d_groupMembers);
 	_CUDA_CALL(cudaDeviceSynchronize());
 }
 

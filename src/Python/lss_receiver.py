@@ -35,5 +35,6 @@ while True:
     # A packet arrives for every sorter batch, even one with no spikes.
     for i in range(n_records):
         sample, cluster, amplitude = RECORD.unpack_from(packet, HEADER.size + i * RECORD.size)
+        # ---------------------------------- RENAME ----------------------------------
         # cluster uses oss_input/templateMap.npy to map to the Kilosort cluster ID (column 2 of spikeOutput.txt)
         print(f"sample {sample}  cluster {cluster}  amp {amplitude:.1f}")

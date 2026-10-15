@@ -51,6 +51,8 @@ void findMatchingIndices(const float* d_Cfmaxpool,
 	long T, int currBatchNumSamples, long M,
 	thrust::device_vector<long>& matching_indices, int* d_count);
 void medianRemove(float* data, int C, int currBatchNumSamples);
+void groupedMedianRemove(float* data, int C, int currBatchNumSamples,
+	const int* d_groupOffsets, const int* d_groupMembers, int numGroups, int sortLen);
 void reciprocal(float* d_nm, long unclu_T);
 
 class myDCRemover {

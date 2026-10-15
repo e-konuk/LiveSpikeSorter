@@ -3,6 +3,7 @@ import pathlib
 from pathlib import Path
 from crop_methods import crop_kilosort_output, parse_bin_meta_file
 from subset_templates import subset_oss_input_inplace, parse_channel_range
+from cmr_groups import CMR_MODES, compute_cmr_groups
 from sdm_processors import PROCESSORS, Context, default_values, to_exe_args
 import numpy as np
 import subprocess
@@ -138,6 +139,7 @@ template_toggle_vars = []
 probe_vars = []            # per sorter: imec probe (SpikeGLX substream) it sorts
 max_templates_vars = []
 channel_range_vars = []
+cmr_mode_vars, cmr_block_vars = [], []   # per sorter: median-reference grouping used by Kilosort + LSS
 template_frames, file_frames, sdm_frames = [], [], []
 
 # Hints dictionary
@@ -156,6 +158,14 @@ HINTS = {
                       "matchingPursuit = better real-time performance on low-spec "
                       "GPUs, at some loss of detection. Applied to oss_input every "
                       "launch."),
+    "CMR": ("Common median reference grouping. Global = one median across all "
+            "channels (Kilosort default). The ADC presets take the median over "
+            "channels the probe samples at the same instant (NP1.0: 12 groups of 32, "
+            "NP2.0: 16 groups of 24), which cancels high-frequency noise better. "
+            "Auto picks the preset from imDatPrb_type in the .meta file. Contiguous "
+            "blocks = groups of N neighbouring channels. Used when Kilosort4 is "
+            "re-run, and the online sorter applies the same groups. Reusing an "
+            "existing Kilosort output keeps the grouping it was trained with."),
     "CHANNEL_RANGE": ("Keep only templates with support on a probe channel range, "
                       "e.g. '100-150' (inclusive probe channel numbers; blank = all "
                       "channels). Use this to focus the sorter on one region of "
@@ -389,7 +399,7 @@ def update_tabs():
                     sdm_subset_vars, sdm_trigger_bin_ms_vars,
                     sdm_processor_vars, sdm_param_vars, sdm_param_frames,
                     template_toggle_vars, max_templates_vars, channel_range_vars,
-                    template_frames, file_frames, sdm_frames, probe_vars):
+                    cmr_mode_vars, cmr_block_vars, template_frames, file_frames, sdm_frames, probe_vars):
             del lst[n:]
 
     # Append new entries if increasing
@@ -414,6 +424,8 @@ def update_tabs():
         probe_vars[-1].trace_add("write", refresh_tab_labels)
         max_templates_vars.append(tk.StringVar(value="0"))
         channel_range_vars.append(tk.StringVar(value=""))
+        cmr_mode_vars.append(tk.StringVar(value=CMR_MODES[0]))
+        cmr_block_vars.append(tk.StringVar(value="32"))
         template_frames.append(None)
         file_frames.append(None)
         sdm_frames.append(None)
@@ -619,6 +631,25 @@ def build_tab(frame, idx):
     tk.Button(
         f_frame, text="?", command=lambda i=idx: show_hint("CHANMAP"), width=3
     ).grid(row=2, column=3)
+
+    # Median reference grouping (applied in Kilosort4 and in LSS)
+    tk.Label(f_frame, text="Median reference:").grid(
+        row=3, column=0, padx=5, pady=5, sticky="w"
+    )
+    cmr_row = tk.Frame(f_frame)
+    cmr_row.grid(row=3, column=1, sticky="w")
+    block_entry = tk.Entry(cmr_row, textvariable=cmr_block_vars[idx], width=6)
+    def cmr_changed(*_):
+        block_entry.configure(state="normal" if cmr_mode_vars[idx].get() == CMR_MODES[4] else "disabled")
+    tk.OptionMenu(cmr_row, cmr_mode_vars[idx], *CMR_MODES, command=cmr_changed).grid(
+        row=0, column=0, sticky="w"
+    )
+    tk.Label(cmr_row, text="Block size:").grid(row=0, column=1, padx=(10, 2))
+    block_entry.grid(row=0, column=2)
+    cmr_changed()
+    tk.Button(
+        f_frame, text="?", command=lambda: show_hint("CMR"), width=3
+    ).grid(row=3, column=3)
     f_frame.grid(row=1, column=0, padx=5, pady=5, sticky="w")
     toggle_rerun(idx)
 
@@ -738,6 +769,10 @@ def main():
             render_processor_settings(i)
             max_templates_vars[i].set(state.get("max_templates", ["0"] * num_sorters_var.get())[i])
             channel_range_vars[i].set(state.get("channel_ranges", [""] * num_sorters_var.get())[i])
+            modes = state.get("cmr_modes", [])
+            cmr_mode_vars[i].set(modes[i] if i < len(modes) and modes[i] in CMR_MODES else CMR_MODES[0])
+            blocks = state.get("cmr_block_sizes", [])
+            cmr_block_vars[i].set(blocks[i] if i < len(blocks) else "32")
             flags = state.get("template_filter_flags", [])
             template_toggle_vars[i].set(flags[i] if i < len(flags) else False)
             toggle_template(i)
@@ -773,6 +808,7 @@ def run_online_multi():
     RAW_CHANNEL_RANGES = [v.get().strip() for v in channel_range_vars]
     MAX_TEMPLATES = [m if on else "0" for m, on in zip(RAW_MAX_TEMPLATES, TEMPLATE_FILTER_FLAGS)]
     CHANNEL_RANGES = [c if on else "" for c, on in zip(RAW_CHANNEL_RANGES, TEMPLATE_FILTER_FLAGS)]
+    CMR_CONFIGS = [(m.get(), b.get().strip()) for m, b in zip(cmr_mode_vars, cmr_block_vars)]
     SGLX_HOST = sglx_host_var.get().strip()
     SGLX_PORT = sglx_port_var.get().strip()
     DRIFT_ENABLED = drift_enabled_var.get()
@@ -813,7 +849,9 @@ def run_online_multi():
         "sdm_params": SDM_PARAMS,
         "template_filter_flags": TEMPLATE_FILTER_FLAGS,
         "max_templates": RAW_MAX_TEMPLATES,
-        "channel_ranges": RAW_CHANNEL_RANGES
+        "channel_ranges": RAW_CHANNEL_RANGES,
+        "cmr_modes": [m for m, _ in CMR_CONFIGS],
+        "cmr_block_sizes": [b for _, b in CMR_CONFIGS]
     }
     try:
         with open(STATE_FILE, "w") as f:
@@ -824,7 +862,7 @@ def run_online_multi():
     # Curate OSS input dirs
     OSS_DIRS = curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
                                      META_FILES, CHANMAP_FILES, RERUN_FLAGS,
-                                     MAX_TEMPLATES, CHANNEL_RANGES)
+                                     MAX_TEMPLATES, CHANNEL_RANGES, CMR_CONFIGS)
 
     PREPARED = {}
     for i, proc_name in enumerate(SDM_PROCESSORS):
@@ -941,7 +979,7 @@ def run_online_multi():
         rerun = [(i in retrain_sources) for i in range(len(BASE_PATHS))]
         OSS_DIRS = curate_oss_input_dir(
             BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES, META_FILES, CHANMAP_FILES,
-            rerun, MAX_TEMPLATES, CHANNEL_RANGES, retrain_sources=retrain_sources)
+            rerun, MAX_TEMPLATES, CHANNEL_RANGES, CMR_CONFIGS, retrain_sources=retrain_sources)
         print("[Retrain] Templates rebuilt. Relaunching sorter...")
 
 
@@ -1054,7 +1092,7 @@ def save_kilosort_drift_plots(dshift, st0, settings):
 
 def run_kilosort_with_drift_plots(settings, probe_name=None, results_dir=None,
                                   filename=None, data_dtype=None, do_CAR=True,
-                                  invert_sign=False, device=None):
+                                  invert_sign=False, device=None, cmr=None):
     """
     Runs kilosort.run_kilosort() with the drift-correction outputs
     """
@@ -1083,6 +1121,22 @@ def run_kilosort_with_drift_plots(settings, probe_name=None, results_dir=None,
     tic0 = time.time()
     ops = initialize_ops(settings, probe, data_dtype, do_CAR, invert_sign,
                          device, False)
+
+    # Median reference groups 
+    car_groups = np.zeros(len(probe['chanMap']), dtype=np.int32)
+    if cmr is not None:
+        car_groups, desc = compute_cmr_groups(cmr[0], cmr[1], cmr[2], probe['chanMap'])
+        print(f"Median reference: {desc}")
+        if np.unique(car_groups).size > 1:
+            import inspect
+            from kilosort.io import BinaryFiltered
+            if 'car_groups' not in inspect.signature(BinaryFiltered.__init__).parameters:
+                raise RuntimeError(
+                    "Grouped median reference needs the patched Kilosort in External/Kilosort. "
+                    "Install it with: pip install ./External/Kilosort")
+            ops['car_groups'] = car_groups
+    np.save(Path(results_dir) / 'car_groups.npy', car_groups)
+
     ops = compute_preprocessing(ops, device, tic0=tic0)
 
     np.random.seed(1)
@@ -1222,7 +1276,7 @@ def snapshot_drift_stage(ops, st0, device=None):
 def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
                          META_FILES, CHANMAP_FILES, RERUN_FLAGS,
                          MAX_TEMPLATES=None, CHANNEL_RANGES=None,
-                         retrain_sources=None):
+                         CMR_CONFIGS=None, retrain_sources=None):
     retrain_sources = retrain_sources or {}
     OSS_DIRS = []
     for i, base in enumerate(BASE_PATHS):
@@ -1263,11 +1317,13 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
             meta = parse_bin_meta_file(meta_path)
             start = time.time()
             settings = {'data_dir': data_dir, 'n_chan_bin': meta['nSavedChans']}
+            cmr_mode, cmr_block = CMR_CONFIGS[i] if CMR_CONFIGS else (CMR_MODES[0], "32")
             drift_snapshot = run_kilosort_with_drift_plots(
                 settings=settings,
                 probe_name=CHANMAP_FILES[i],
                 results_dir=str(ks_out),
-                filename=bin_path)
+                filename=bin_path,
+                cmr=(cmr_mode, cmr_block, meta))
             print(f"Kilosort sorter {i+1} took {time.time() - start:.2f} s")
         else:
             drift_snapshot = None
@@ -1334,6 +1390,10 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
         np.save(oss_in / 'cluster_centroids.npy', centroids)
         np.save(oss_in / 'hp_filter.npy', hpf)
         np.save(oss_in / 'drift_matrix.npy', drift_matrix)
+        # Median reference groups Kilosort trained with (absent = stock global median)
+        cg_src = ks_out / 'car_groups.npy'
+        car_groups = np.load(cg_src) if cg_src.exists() else np.zeros(channel_map.shape[0], dtype=np.int32)
+        np.save(oss_in / 'car_groups.npy', car_groups.astype(np.int32))
         np.save(oss_in / 'iCC.npy', iCC)
         np.save(oss_in / 'iU.npy', iU)
         np.save(oss_in / 'Ucc.npy', Ucc)

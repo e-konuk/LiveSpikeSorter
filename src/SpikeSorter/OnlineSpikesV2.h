@@ -48,6 +48,7 @@ private:
 	void loadWhitening(std::string filepath);
 	void loadChannelMap(std::string filepath);
 	void loadTemplateMap(std::string filepath);
+	void loadCarGroups(std::string filepath);
 	void loadKilosortTrainingData(std::string directoryPath);
 	void loadKilosortClusteringData(std::string directoryPath);
 
@@ -124,6 +125,12 @@ private:
 	std::vector<float> xs;
 	std::vector<float> ys;
 	std::vector<long> lastSpikeTime; // size T: will remove duplicate spikes
+
+	// Grouped common median reference (car_groups.npy). carNumGroups <= 1: one global median.
+	int  carNumGroups = 1;
+	int  carSortLen = 0;            // next power of two >= largest group
+	int* d_carOffsets = nullptr;    // carNumGroups + 1
+	int* d_carMembers = nullptr;    // C channel rows, grouped
 
 	// Device pointers
 	float p2p;

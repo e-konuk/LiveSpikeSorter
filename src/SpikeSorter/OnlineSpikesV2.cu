@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <typeinfo>
 #include <vector>
+#include <map>
 #include <thread>
 #include "../Helpers/Timer.h"
 #include <fstream>
@@ -327,6 +328,9 @@ OnlineSpikesV2::~OnlineSpikesV2()
 	}
 	m_hpPlanCache.clear();
 
+	if (d_carOffsets) { _CUDA_CALL(cudaFree(d_carOffsets)); d_carOffsets = nullptr; }
+	if (d_carMembers) { _CUDA_CALL(cudaFree(d_carMembers)); d_carMembers = nullptr; }
+
 	// Close files and perform other cleanup
 	spikesFileOut.close();
 }
@@ -524,6 +528,7 @@ void OnlineSpikesV2::initializeStaticMemory(InputParameters params)
 	static const char *ptLabel = { "OnlineSpikesV2::initializeStaticMemory" };
 
 	loadChannelMap(params.sInputFolder + "channelMap.npy");
+	loadCarGroups(params.sInputFolder + "car_groups.npy");
 	loadTemplates(params.sInputFolder + "templates.npy");
 	loadWhitening(params.sInputFolder + "whiteningMat.npy");
 	loadTemplateMap(params.sInputFolder + "templateMap.npy");
@@ -585,6 +590,55 @@ void OnlineSpikesV2::loadChannelMap(std::string filepath)
 		_RUN_ERROR(ptLabel, "loadChannelMap: Wrong size, size should be: " + std::to_string(C) + ", but is: " + std::to_string(npChannelMap.shape[0]));
 
 	memcpy(channelMap.data(), npChannelMap.data<int>(), C * sizeof(int));
+}
+
+// Channel groups for common median referencing, one group id per channel row (int32, size C).
+void OnlineSpikesV2::loadCarGroups(std::string filepath)
+{
+	static const char *ptLabel = { "OnlineSpikesV2::loadCarGroups" };
+	namespace fs = std::experimental::filesystem;
+
+	carNumGroups = 1;
+	if (!fs::exists(filepath)) {
+		std::cout << "No car_groups.npy found: using global median reference." << std::endl;
+		return;
+	}
+
+	cnpy::NpyArray npGroups = cnpy::npy_load(filepath);
+	if (npGroups.word_size != sizeof(int) || npGroups.shape.size() != 1 || npGroups.shape[0] != C)
+		_RUN_ERROR(ptLabel, "car_groups.npy must be int32 with " + std::to_string(C) + " entries");
+	const int* groups = npGroups.data<int>();
+
+	// Bucket channel rows by group id (ids need not be contiguous)
+	std::map<int, std::vector<int>> buckets;
+	for (int c = 0; c < C; c++)
+		buckets[groups[c]].push_back(c);
+
+	if (buckets.size() <= 1) {
+		std::cout << "car_groups.npy has one group: using global median reference." << std::endl;
+		return;
+	}
+
+	std::vector<int> offsets{ 0 }, members;
+	size_t maxGroup = 0;
+	for (auto& kv : buckets) {
+		members.insert(members.end(), kv.second.begin(), kv.second.end());
+		offsets.push_back((int)members.size());
+		if (kv.second.size() > maxGroup) maxGroup = kv.second.size();
+	}
+	carSortLen = 1;
+	while (carSortLen < (int)maxGroup) carSortLen *= 2;
+	if (carSortLen > 1024)
+		_RUN_ERROR(ptLabel, "car_groups.npy: largest group exceeds 1024 channels");
+	carNumGroups = (int)buckets.size();
+
+	_CUDA_CALL(cudaMalloc((void**)&d_carOffsets, offsets.size() * sizeof(int)));
+	_CUDA_CALL(cudaMalloc((void**)&d_carMembers, members.size() * sizeof(int)));
+	_CUDA_CALL(cudaMemcpy(d_carOffsets, offsets.data(), offsets.size() * sizeof(int), cudaMemcpyHostToDevice));
+	_CUDA_CALL(cudaMemcpy(d_carMembers, members.data(), members.size() * sizeof(int), cudaMemcpyHostToDevice));
+
+	std::cout << "Grouped median reference: " << carNumGroups << " groups, largest " << maxGroup
+	          << " channels (sort width " << carSortLen << ")." << std::endl;
 }
 
 void OnlineSpikesV2::loadTemplateMap(std::string filepath)
@@ -895,7 +949,10 @@ void OnlineSpikesV2::runSpikeSorting()
 		// Median removal
 		{
 			Timer timer("medianRemove()");
-			medianRemove(d_fetchBuf, C, currBatchNumSamples);
+			if (carNumGroups > 1)
+				groupedMedianRemove(d_fetchBuf, C, currBatchNumSamples, d_carOffsets, d_carMembers, carNumGroups, carSortLen);
+			else
+				medianRemove(d_fetchBuf, C, currBatchNumSamples);
 		}
 		_CUDA_CALL(cudaDeviceSynchronize());
 

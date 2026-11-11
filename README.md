@@ -23,9 +23,11 @@ Live Spike Sorter (LSS) is a GPU-accelerated real-time spike sorter for extracel
 
 ## Python Setup
 
-Install an Anaconda distribution of Python, then from your repository root:
+Install an Anaconda distribution of Python (e.g. [Miniforge](https://github.com/conda-forge/miniforge)), then clone the repository and create the environment from its root:
 
 ```bash
+git clone https://github.com/MShreyasStanford/LiveSpikeSorter.git
+cd LiveSpikeSorter
 conda env create -f environment.yml
 conda activate lss
 ```
@@ -38,7 +40,7 @@ Update an existing environment with:
 
 ## Installing LSS
 
-Download `LiveSpikeSorter-vX.Y.Z-win64.zip` from the [Releases](../../releases) page and extract it into `<repo>\bin\`, so that you have `<repo>\bin\LiveSpikeSorter.exe`. Use the release that matches your checkout (`git checkout vX.Y.Z`); the launcher warns if the exe and the repository versions differ.
+Download `LiveSpikeSorter-vX.Y.Z-win64.zip` from the [Releases](https://github.com/MShreyasStanford/LiveSpikeSorter/releases) page and extract it into `<repo>\bin\`, so that you have `<repo>\bin\LiveSpikeSorter.exe`. Use the release that matches your checkout (`git checkout vX.Y.Z`); the launcher warns if the exe and the repository versions differ.
 
 ## Running LSS 
 
@@ -67,7 +69,7 @@ Only needed if you change the C++/CUDA code.
 3. Select **Release | x64** and build the solution.  
 4. If successful, you should see output in `<repo>\x64\RELEASE\LiveSpikeSorter.exe`. The launcher uses this build over `bin\`; set `LSS_EXE` to use an exe somewhere else.
 
-Releases are built by `.github/workflows/release.yml` when a `v*` tag matching the `VERSION` file is pushed.
+Releases are built by `.github/workflows/release.yml` when a `v*` tag matching the `VERSION` file is pushed. Every pull request also builds the zip and attaches it to the workflow run under **Artifacts**, so C++/CUDA changes can be tested without a release.
 
 ## Real-Time Output
 

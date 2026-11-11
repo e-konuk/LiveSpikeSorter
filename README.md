@@ -12,9 +12,10 @@ Live Spike Sorter (LSS) is a GPU-accelerated real-time spike sorter for extracel
 
 | Requirement | Version / Notes |
 | :---- | :---- |
-| **NVIDIA GPU** | Compute capability 7.5 (Turing) through 8.9 (Ada). RTX 50-series (Blackwell) is not supported yet |
+| **NVIDIA GPU** | Compute capability 7.5 (Turing) through 8.9 (Ada). |
 | **NVIDIA driver** | 522.06 or newer |
-| **CUDA / cuDNN** | 11.8 / 8.9.7 (installed by conda) |
+| **CUDA** | 11.8 (installed by conda) |
+| **cuDNN** | 8.9.7 (installed by conda) |
 | **Python** | 3.10 – 3.12 (installed by conda) |
 | **SpikeGLX** | Latest release |
 | **Kilosort4** | 4.0.13 from PyPI |
@@ -23,11 +24,15 @@ Live Spike Sorter (LSS) is a GPU-accelerated real-time spike sorter for extracel
 
 ## Python Setup
 
-Install an Anaconda distribution of Python (e.g. [Miniforge](https://github.com/conda-forge/miniforge)), then clone the repository and create the environment from its root:
+Install an Anaconda distribution of Python, then clone the repository:
 
 ```bash
-git clone https://github.com/MShreyasStanford/LiveSpikeSorter.git
+git clone https://github.com/e-konuk/LiveSpikeSorter.git
 cd LiveSpikeSorter
+```
+
+Then create your enviornment and install dependencies:
+```bash
 conda env create -f environment.yml
 conda activate lss
 ```
@@ -40,7 +45,7 @@ Update an existing environment with:
 
 ## Installing LSS
 
-Download `LiveSpikeSorter-vX.Y.Z-win64.zip` from the [Releases](https://github.com/MShreyasStanford/LiveSpikeSorter/releases) page and extract it into `<repo>\bin\`, so that you have `<repo>\bin\LiveSpikeSorter.exe`. Use the release that matches your checkout (`git checkout vX.Y.Z`); the launcher warns if the exe and the repository versions differ.
+Download `LiveSpikeSorter-vX.Y.Z-win64.zip` from the [Releases](https://github.com/e-konuk/LiveSpikeSorter/releases/tag/v1.0.0) page and extract it into `<repo>\bin\`, so that you have `<repo>\bin\LiveSpikeSorter.exe`. Use the release that matches your checkout (`git checkout vX.Y.Z`); the launcher warns if the exe and the repository versions differ.
 
 ## Running LSS 
 
@@ -49,16 +54,14 @@ From the `lss` environment, in any directory:
 lss
 ```
 
-(`environment.yml` installs the `lss` command from this checkout. In an environment created before it existed, run `conda env update -f environment.yml --prune` once, or `python src/Python/run_lss.py` still works.)
-
 The GUI lets you configure one or more sorter instances, select Kilosort output directories, and optionally re-run Kilosort4 before launching LSS. You must run Kilosort4 on a short recording (10–20 minutes) to generate templates, the whitening matrix, drift matrices, and other tensors that LSS needs at runtime.
 
 ## Building from Source
 
 Only needed if you change the C++/CUDA code.
 
-1. Install Visual Studio 2022 (Build Tools, `v143` toolset), then the [CUDA 11.8 toolkit](https://developer.nvidia.com/cuda-11-8-0-download-archive). Install CUDA after Visual Studio so it registers its build integration, and check that `CUDA_PATH` points to it (e.g. `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8`).  
-2. cuDNN comes from the `lss` environment. Point the build at it and open the solution from an activated prompt (or set `CUDNN_PATH` permanently as a user environment variable):
+1. Install Visual Studio 2022 (Build Tools, `v143` toolset), then the [CUDA 11.8 toolkit](https://developer.nvidia.com/cuda-11-8-0-download-archive). Check that `CUDA_PATH` points to it (e.g. `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8`).  
+2. cuDNN comes from the `lss` environment. Point the build at it and open the solution from an activated prompt:
 
    ```bash
    conda activate lss
@@ -66,10 +69,9 @@ Only needed if you change the C++/CUDA code.
    devenv LiveSpikeSorter.sln
    ```
 
-3. Select **Release | x64** and build the solution.  
-4. If successful, you should see output in `<repo>\x64\RELEASE\LiveSpikeSorter.exe`. The launcher uses this build over `bin\`; set `LSS_EXE` to use an exe somewhere else.
+3. Open `LiveSpikeSorter.vcxproj`, select  **Release | x64** and build the solution.  
+4. If successful, you should see output in `<repo>\x64\RELEASE\LiveSpikeSorter.exe`. The launcher will prioritize this build.
 
-Releases are built by `.github/workflows/release.yml` when a `v*` tag matching the `VERSION` file is pushed. Every pull request also builds the zip and attaches it to the workflow run under **Artifacts**, so C++/CUDA changes can be tested without a release.
 
 ## Real-Time Output
 

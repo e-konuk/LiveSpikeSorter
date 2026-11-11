@@ -4,15 +4,14 @@
 #include <mutex>
 #include <vector>
 #include <memory>
-#include "BaseModel.h"
-#include "dataBinner.h"
+#include <thread>
 #include "SdmProcessor.h"
+#include "../Helpers/FileWriter.h"
 #include "../Networking/Sock.h"
 #include "../Networking/sorterParameters.h"
-#include "../Networking/onlineSpikesPayload.h"
+#include "../Networking/spikesPayload.h"
 #include "../Networking/inputParameters.h"
 #include "../SpikeSorter/dataSocket.h"
-#include "SKLearnModel.h"
 
 class Decoder {
 public:
@@ -29,26 +28,16 @@ private:
 	// Thread functions
 	std::thread eventReceiverThread;
 	void spikeReceiver();
-	void decode(long samplecount);
 
 	// Variables for GUI
 	sockaddr_in guiAddr;
 
 	int16_t guiLabel; // guiLabel and eventLabel are different variables so reading in new eventStreamSampleCt doesn't change the true label on GUI
 	long guiEventStreamSampleCt; // Same with eventStreamSampleCt
-	int16_t predictLabel;
 	int16_t nTrials;
-	int16_t nCorrect;
-	double confidence;
 
 	long streamSampleCt;
 	long recordingOffset;
-
-	// Variables used if isDecoding is true
-	std::unique_ptr<BaseModel> model;
-	DataBinner fileDataBinner;
-	DataBinner streamDataBinner;
-	int windowLength;
 
 
 	// Socket for communication with sorter and GUI
@@ -65,9 +54,7 @@ private:
 	int m_sdmTriggerBinMs;
 	float m_sdmSamplingRateHz;
 
-	bool isDecoding;
 	bool readFromFile;
-	bool isSendingFeedback;
 
 	// File writing helper objects
 	FileWriter 			m_fwOut;				// File writer to record spikes

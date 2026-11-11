@@ -14,7 +14,7 @@
 #include "DriftFingerprint.h"
 
 //
-// DriftEstimator -- live rigid drift estimation for OnlineSpikesV2.
+// DriftEstimator -- live rigid drift estimation for LiveSorter.
 //
 //   Every batch, scans the whitened (but NOT yet drift-corrected) data with
 //   Kilosort's universal templates, giving a set of (depth, amplitude) pairs.
@@ -117,7 +117,7 @@ private:
 	float*   h_spikeDepth = nullptr;  // pinned
 	float*   h_spikeAmp   = nullptr;  // pinned
 
-	// borrowed from OnlineSpikesV2's pool
+	// borrowed from LiveSorter's pool
 	const float* d_xc = nullptr;
 	const float* d_yc = nullptr;
 	float*   d_iKxx = nullptr;

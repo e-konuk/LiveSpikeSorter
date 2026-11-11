@@ -20,10 +20,10 @@ OutputGui::~OutputGui()
 	}
 }
 
-void OutputGui::setupOutput(sockaddr_in mainAddr, long maxScanWind, long spikeRateWindow, bool isDecoding)
+void OutputGui::setupOutput(sockaddr_in mainAddr, long maxScanWind, long spikeRateWindow)
 {
 	for (const auto &tab : tabs) {
-		tab->setupOutput(mainAddr, maxScanWind, spikeRateWindow, isDecoding);
+		tab->setupOutput(mainAddr, maxScanWind, spikeRateWindow);
 	}
 }
 

@@ -197,7 +197,7 @@ DriftEstimator::~DriftEstimator()
 	if (m_cublas) cublasDestroy(m_cublas);
 	if (m_stream) cudaStreamDestroy(m_stream);
 
-	// d_matA / d_matB are NOT freed here: they belong to OnlineSpikesV2's X-macro tensor pool
+	// d_matA / d_matB are NOT freed here: they belong to LiveSorter's X-macro tensor pool
 	cudaFree(d_wTEMP);  cudaFree(d_iC);    cudaFree(d_iC2);  cudaFree(d_weigh);
 	cudaFree(d_B);      cudaFree(d_As);    cudaFree(d_imaxs);
 	cudaFree(d_Amaxs);  cudaFree(d_peakFilt); cudaFree(d_peakTime);
@@ -593,7 +593,7 @@ void DriftEstimator::workerLoop()
 
 // Decide whether the on-disk drift_matrix.npy convention is M or M^T.
 //
-// The launcher saves get_drift_matrix(...).T (run_online_spikes.py), while the
+// The launcher saves get_drift_matrix(...).T (run_lss.py), while the
 // sorter applies the matrix as a plain row-major left-multiply. Rather than
 // hard-code an assumption about which way round that lands, rebuild the matrix
 // here at the SAME shift the launcher used and keep whichever orientation

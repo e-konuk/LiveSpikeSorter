@@ -2,7 +2,7 @@ function cropBinCalvin(pathToBinFile, binFile, folderName, outFile, streamSample
     % Open original bin file accquired by spikeglx
     fidInput = fopen(fullfile(pathToBinFile, binFile), 'rb');
     
-    % Data to be fed into onlinespikesorte
+    % Data to be fed into the live spike sorter
     trainBinFName = fullfile(folderName, outFile); % reconsider naming scheme
     fidOutput = fopen(trainBinFName, 'wb');
     

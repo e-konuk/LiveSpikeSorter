@@ -33,7 +33,6 @@ public:
 	void WriteProcessTime(int processTime);
 	void WriteSpike	( long time, long neuron, float amplitude );
 	void WriteDecoderInput( int label, std::map<long, double> &window );
-	void WritePrediction(int label, int predictLabel, std::vector<double> probabilities, float accuracy, long samplecount);
 	void WriteEvent ( t_ull time, int label);
 
 

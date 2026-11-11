@@ -9,7 +9,7 @@ class OutputGui
 public:
 	OutputGui(InputParameters cmdLineParams);
 	~OutputGui();
-	void setupOutput(sockaddr_in mainAddr, long maxScanWind, long spikeRateWindow, bool isDecoding);
+	void setupOutput(sockaddr_in mainAddr, long maxScanWind, long spikeRateWindow);
 	void Render(const ImVec2 windowCenter);
 private:
 	std::vector<OutputGuiTab*> tabs;

@@ -14,7 +14,7 @@ ImGuiID g_rasterDockNode = 0;
 #include "../Helpers/TimeHelpers.h"
 #include "../Helpers/GuiHelpers.h"
 #include "../Networking/sorterParameters.h"
-#include "../Networking/onlineSpikesPayload.h"
+#include "../Networking/spikesPayload.h"
 #include "../Networking/NetworkHelpers.h"
 #include "Gui.h"
 
@@ -156,12 +156,12 @@ InputParameters Gui::gatherInputParameters()
 	return inputGUI.getInputParameters();
 }
 
-void Gui::plotOutputs(sockaddr_in mainAddr, long m_lMaxScanWind, long m_lSpikeRateWindow, bool isDecoding)
+void Gui::plotOutputs(sockaddr_in mainAddr, long m_lMaxScanWind, long m_lSpikeRateWindow)
 {
 	// For setting the window positions
 	const ImVec2 windowCenter = ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f);
 	
-	outputGUI.setupOutput(mainAddr, m_lMaxScanWind, m_lSpikeRateWindow, isDecoding);
+	outputGUI.setupOutput(mainAddr, m_lMaxScanWind, m_lSpikeRateWindow);
 
 	// Pin ini next to the exe so layout persists regardless of working directory
 	static char s_iniPath[MAX_PATH];

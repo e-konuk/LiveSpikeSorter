@@ -121,7 +121,7 @@ void FileWriter::WriteHeader(long lChannels, std::string sChannelMap, long lTemp
 	}
 
 	std::string sCTime = currentDateTime();
-	fprintf( m_fFile, "########### Spike Output from Online Spike Tool ###########\n" );
+	fprintf( m_fFile, "########### Spike Output from Live Spike Sorter ###########\n" );
 	fprintf( m_fFile, "Time:			%s\n", sCTime.c_str() );
 	fprintf( m_fFile, "Channel #:		%ld\n", lChannels);
 	fprintf( m_fFile, "Channel Map:		%s\n", sChannelMap.c_str() );
@@ -168,24 +168,6 @@ void FileWriter::WriteDecoderInput( int label, std::map<long, double> &window ) 
 	fprintf(m_fFile, "+%d", label);
 	for (auto const&[channel, count] : window)
 		fprintf(m_fFile, " %d:%f", channel, count); // Channel +1 because libSVM is 1-indexed REMEMBER THIS
-	fprintf(m_fFile, "\n");
-	fflush(m_fFile);
-}
-
-void FileWriter::WritePrediction(int label, int predictLabel, std::vector<double> probabilities, float accuracy, long samplecount) {
-	static const char *ptLabel = { "FileWriter::WritePrediction" };
-	if (!m_bIsOpen) {
-		_DEBUG_PUT_0(ptLabel, "Attempting to write, but file not opened!");
-		return;
-	}
-
-	//fprintf(m_fFile, "%d %d %f %ld  ", label, predictLabel, accuracy, samplecount);
-	fprintf(m_fFile, "%ld %d", samplecount, predictLabel);
-
-	if (accumulate(probabilities.begin(), probabilities.end(), 0.0) != 0.0) { // Only output probabilities if predict_probability
-		for (auto const& prob : probabilities)
-			fprintf(m_fFile, " %f", prob);
-	}
 	fprintf(m_fFile, "\n");
 	fflush(m_fFile);
 }

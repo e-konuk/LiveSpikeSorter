@@ -2,7 +2,7 @@
 
 Each Processor below lists the settings an experimenter sees in the launcher's SDM
 panel. The launcher builds the widgets from this list, saves the values in
-multi_gui_state.json, and hands them to OnlineSpikes.exe itself (as
+multi_gui_state.json, and hands them to LiveSpikeSorter.exe itself (as
 `--sdm_param key=value ...`); nobody types them. On the C++ side the processor reads
 each value by the same key:
 
@@ -10,8 +10,8 @@ each value by the same key:
     m_triggerZ = p.getFloat("trigger_z", 1.0f);
 
 So adding a processor is: the C++ class (ending in REGISTER_SDM_PROCESSOR("name", ...)),
-its two lines in OnlineSpikes.vcxproj, and one Processor(...) entry here with the same
-name and keys. run_online_spikes.py, main.cpp, Decoder.cpp and inputParameters.h need
+its two lines in LiveSpikeSorter.vcxproj, and one Processor(...) entry here with the same
+name and keys. run_lss.py, main.cpp, Decoder.cpp and inputParameters.h need
 no edits.
 
 Settings left blank are not passed, so the C++ default applies.
@@ -58,7 +58,7 @@ class Processor:
     name: str                         # must match REGISTER_SDM_PROCESSOR("name", ...) in C++
     help: str
     params: List[Param] = field(default_factory=list)
-    # Runs automatically for this sorter right before OnlineSpikes.exe starts.
+    # Runs automatically for this sorter right before LiveSpikeSorter.exe starts.
     prepare: Optional[Callable[[Context], Prepared]] = None
     # Optional extra launcher button: (label, hook). Its subset (if any) fills the Subset box.
     button: Optional[Tuple[str, Callable[[Context], Prepared]]] = None

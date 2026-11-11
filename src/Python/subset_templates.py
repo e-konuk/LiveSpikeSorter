@@ -8,7 +8,7 @@ GPUs can run the real-time sorter faster.
 
 The dominant GPU step (`matchingPursuit`) convolves the live stream against
 `Wall3.npy`, whose first dimension is the *preclustered* template count
-(`unclu_T` in OnlineSpikesV2). Its cost scales ~linearly with `unclu_T`, so
+(`unclu_T` in LiveSorter). Its cost scales ~linearly with `unclu_T`, so
 trimming `unclu_T` is the lever that actually buys real-time headroom.
 
 This tool subsets ONLY the preclustered (`unclu_T`) space. It leaves the
@@ -49,7 +49,7 @@ UNCLU_T_AXES = {
     "ctc.npy": (0, 1),                            # [unclu_T, unclu_T, 2M+1]
     "ctc_permuted.npy": (0, 1),                   # [unclu_T, unclu_T, 2M+1]; not engine-loaded, kept consistent
     "iU.npy": (0,),                               # [unclu_T]
-    "Ucc.npy": (1,),                              # [numNearestChans, unclu_T, K] -- see d_Ucc indexing OnlineSpikesV2.cu:162-164
+    "Ucc.npy": (1,),                              # [numNearestChans, unclu_T, K] -- see d_Ucc indexing LiveSorter.cu:162-164
     "preclustered_template_waveforms.npy": (0,),  # [unclu_T, M, C]
 }
 
@@ -292,7 +292,7 @@ def subset_oss_input_inplace(oss_dir, n, metric="spikes", allow_below_t=False,
                              channel_range=None, channel_criterion="peak"):
     """Subset the preclustered (unclu_T) tensors of an oss_input dir IN PLACE.
 
-    Called by run_online_spikes.py right after it regenerates `oss_input`.
+    Called by run_lss.py right after it regenerates `oss_input`.
 
     Two independent, composable filters select which preclustered templates to
     keep:

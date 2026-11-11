@@ -1,0 +1,74 @@
+# Builds LiveSpikeSorter.exe. On a v* tag, attaches the zip to a GitHub Release.
+# On a pull request, or when run by hand (Actions tab -> Release -> Run workflow), it only
+# uploads the zip as a build artifact. GitHub shows "Run workflow" only once this file is on
+# the default branch, so test changes to it through a pull request.
+#
+# To release: set VERSION, commit, then `git tag v<VERSION>` and `git push origin v<VERSION>`.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          if ("${{ github.ref_name }}" -ne "v$version") {
+            throw "Tag ${{ github.ref_name }} does not match VERSION file ($version)"
+          }
+
+      - name: Install CUDA 11.8 and cuDNN 8.9.7
+        shell: pwsh
+        run: scripts/ci/install-cuda.ps1
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $msbuild = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * `
+                       -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" | Select-Object -First 1
+          # WindowsTargetPlatformVersion=10.0: use whichever Windows 10/11 SDK the runner has
+          & $msbuild LiveSpikeSorter.sln /t:Build /p:Configuration=Release /p:Platform=x64 `
+                     /p:WindowsTargetPlatformVersion=10.0 /m /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "Build failed" }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $dist = "dist\LiveSpikeSorter"
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          # The exe and the SpikeGLX API DLL (with its MinGW runtime). The CUDA and cuDNN
+          # DLLs come from the conda environment, see environment.yml.
+          Copy-Item x64\RELEASE\LiveSpikeSorter.exe, `
+                    x64\RELEASE\SglxApi.dll, `
+                    x64\RELEASE\libgcc_s_seh-1.dll, `
+                    x64\RELEASE\libstdc++-6.dll, `
+                    x64\RELEASE\libwinpthread-1.dll, `
+                    LICENSE $dist
+          Compress-Archive "$dist\*" "dist\LiveSpikeSorter-v$version-win64.zip"
+          "ZIP=dist\LiveSpikeSorter-v$version-win64.zip" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LiveSpikeSorter-win64
+          path: ${{ env.ZIP }}
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" "$env:ZIP" --title "${{ github.ref_name }}" --generate-notes

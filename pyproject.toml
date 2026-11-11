@@ -1,0 +1,24 @@
+# Installs the `lss` command for the launcher. environment.yml installs this in
+# editable mode (`pip install -e .`), which it must be: the launcher finds VERSION,
+# bin\ and x64\RELEASE\ relative to this checkout.
+#
+# Dependencies are managed by environment.yml (conda), so none are listed here.
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "live-spike-sorter"
+dynamic = ["version"]
+description = "Launcher for the Live Spike Sorter (LSS)"
+requires-python = ">=3.10,<3.13"
+
+[project.scripts]
+lss = "run_lss:run_lss_multi"
+
+[tool.setuptools]
+package-dir = { "" = "src/Python" }
+py-modules = ["run_lss", "crop_methods", "subset_templates", "cmr_groups", "sdm_processors", "lss_kilosort"]
+
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }

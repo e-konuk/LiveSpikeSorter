@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RELEASE|x64">
+      <Configuration>RELEASE</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{5BD03465-43CD-41CE-8328-AB8E7A7C8205}</ProjectGuid>
+    <RootNamespace>LiveSpikeSorter</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
+    <CudaToolkitCustomDir>$(CUDA_PATH)</CudaToolkitCustomDir>
+  </PropertyGroup>
+  <PropertyGroup Label="LSS">
+    <!-- Version baked into the exe. Read from VERSION; CI may pass /p:LssVersion=... -->
+    <LssVersion Condition="'$(LssVersion)' == '' and Exists('$(MSBuildThisFileDirectory)VERSION')">$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)VERSION').Trim())</LssVersion>
+    <LssVersion Condition="'$(LssVersion)' == ''">dev</LssVersion>
+    <!-- Optional cuDNN location, e.g. %CONDA_PREFIX%\Library or an extracted NVIDIA cuDNN
+         archive. When CUDNN_PATH is unset, cuDNN must be copied into CUDA_PATH. -->
+    <LssCudnnInclude Condition="'$(CUDNN_PATH)' != ''">$(CUDNN_PATH)\include;</LssCudnnInclude>
+    <LssCudnnLib Condition="'$(CUDNN_PATH)' != ''">$(CUDNN_PATH)\lib;$(CUDNN_PATH)\lib\x64;</LssCudnnLib>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RELEASE|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 11.8.props" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='RELEASE|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+    <LibraryPath>$(LibraryPath)</LibraryPath>
+    <ExecutablePath>$(ExecutablePath)</ExecutablePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RELEASE|x64'">
+    <LinkIncremental>false</LinkIncremental>
+    <LibraryPath>$(LibraryPath)</LibraryPath>
+    <ExecutablePath>$(ExecutablePath)</ExecutablePath>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>WIN64;_DEBUG;_CONSOLE;_SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING;_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH;LSS_VERSION=$(LssVersion);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(LssCudnnInclude)$(ProjectDir)/External;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <ShowIncludes>false</ShowIncludes>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
+      <AdditionalDependencies>cublas.lib;cudnn.lib;ws2_32.lib;npps.lib;d3d12.lib;dxgi.lib;libSglxApi.a;cusolver.lib;cudart.lib;cufft.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(LssCudnnLib)$(SolutionDir)\External\sglx;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <UACExecutionLevel>HighestAvailable</UACExecutionLevel>
+    </Link>
+    <PostBuildEvent>
+    <Command>echo copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"
+copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"
+echo copy "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll" "$(OutDir)"
+copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll" "$(OutDir)"</Command>
+    </PostBuildEvent>
+
+    <CudaCompile>
+      <TargetMachinePlatform>64</TargetMachinePlatform>
+      <Include>$(LssCudnnInclude)%(Include)</Include>
+      <AdditionalOptions>-allow-unsupported-compiler %(AdditionalOptions)</AdditionalOptions>
+    </CudaCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RELEASE|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PreprocessorDefinitions>WIN64;NDEBUG;_CONSOLE;_SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING;_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH;LSS_VERSION=$(LssVersion);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(LssCudnnInclude)$(ProjectDir)/External;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <ShowIncludes>false</ShowIncludes>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <Optimization>MaxSpeed</Optimization>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <SupportJustMyCode>false</SupportJustMyCode>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
+      <AdditionalDependencies>cublas.lib;cudnn.lib;ws2_32.lib;npps.lib;d3d12.lib;dxgi.lib;libSglxApi.a;cusolver.lib;cudart.lib;cufft.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(LssCudnnLib)$(SolutionDir)\External\sglx;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <UACExecutionLevel>HighestAvailable</UACExecutionLevel>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <LinkTimeCodeGeneration>UseFastLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+    </Link>
+    <PostBuildEvent>
+    <Command>echo copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"
+copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"
+echo copy "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll" "$(OutDir)"
+copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll" "$(OutDir)"</Command>
+</PostBuildEvent>
+
+    <CudaCompile>
+      <TargetMachinePlatform>64</TargetMachinePlatform>
+      <Include>$(LssCudnnInclude)%(Include)</Include>
+      <FastMath>true</FastMath>
+      <!-- Native code and PTX for Turing, Ampere and Ada; the PTX lets newer GPUs JIT-compile -->
+      <CodeGeneration>compute_75,sm_75;compute_80,sm_80;compute_86,sm_86;compute_89,sm_89</CodeGeneration>
+      <AdditionalOptions>-allow-unsupported-compiler %(AdditionalOptions)</AdditionalOptions>
+    </CudaCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CudaCompile Include="src\SpikeSorter\myGPUhelpers.cu" />
+    <CudaCompile Include="src\SpikeSorter\myCudnnConvolution.cu" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="External\ImGUI\imgui.cpp" />
+    <ClCompile Include="External\ImGUI\imgui_draw.cpp" />
+    <ClCompile Include="External\ImGUI\imgui_impl_dx12.cpp" />
+    <ClCompile Include="External\ImGUI\imgui_impl_win32.cpp" />
+    <ClCompile Include="External\ImGUI\imgui_stdlib.cpp" />
+    <ClCompile Include="External\ImGUI\imgui_tables.cpp" />
+    <ClCompile Include="External\ImGUI\imgui_widgets.cpp" />
+    <ClCompile Include="External\ImGUI\implot.cpp" />
+    <ClCompile Include="External\ImGUI\implot_items.cpp" />
+    <ClCompile Include="External\CNPY\cnpy.cpp" />
+    <ClCompile Include="External\sglx\SglxCppClient.cpp" />
+    <ClCompile Include="External\tinyfiledialogs\tinyfiledialogs.c" />
+    <CudaCompile Include="src\SpikeSorter\LiveSorter.cu">
+      <FileType>CppCode</FileType>
+    </CudaCompile>
+    <CudaCompile Include="src\SpikeSorter\DriftEstimator.cu">
+      <FileType>CppCode</FileType>
+    </CudaCompile>
+    <ClCompile Include="src\Gui\InputGui.cpp" />
+    <ClCompile Include="src\Gui\OutputGui.cpp" />
+    <ClCompile Include="src\Gui\OutputGuiTab.cpp" />
+    <ClCompile Include="src\Helpers\GuiHelpers.cpp" />
+    <ClCompile Include="src\Networking\FragmentManager.cpp" />
+    <ClCompile Include="src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\SglxCppClient.cpp" />
+    <ClCompile Include="src\SpikeSorter\dataSocket.cpp" />
+    <ClCompile Include="src\Decoder\Decoder.cpp" />
+    <ClCompile Include="src\Decoder\SdmProcessor.cpp" />
+    <ClCompile Include="src\Decoder\ZScoreSdmProcessor.cpp" />
+    <ClCompile Include="src\Decoder\ClosedLoopSdmProcessor.cpp" />
+    <ClCompile Include="src\Decoder\LogRegSdmProcessor.cpp" />
+    <ClCompile Include="src\Decoder\BinCountSdmProcessor.cpp" />
+    <ClCompile Include="src\Helpers\FileWriter.cpp" />
+    <ClCompile Include="src\Gui\Gui.cpp" />
+    <ClCompile Include="src\Helpers\TimeHelpers.cpp" />
+    <ClCompile Include="src\SpikeSorter\mockStreamDataSocket.cpp" />
+    <ClCompile Include="src\SpikeSorter\SorterHelpers.cpp" />
+    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\NetClient\NetClient.cpp" />
+    <ClCompile Include="src\NetClient\Socket.cpp" />
+    <ClCompile Include="src\Networking\NetworkHelpers.cpp" />
+    <ClCompile Include="src\Networking\Sock.cpp" />
+    <ClCompile Include="src\Networking\SpikeStream.cpp" />
+    <ClCompile Include="src\Decoder\dataBinner.cpp" />
+    <ClCompile Include="src\SpikeSorter\ThresholdCrossing.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="External\ImGUI\imconfig.h" />
+    <ClInclude Include="External\ImGUI\imgui.h" />
+    <ClInclude Include="External\ImGUI\imgui_impl_dx12.h" />
+    <ClInclude Include="External\ImGUI\imgui_impl_win32.h" />
+    <ClInclude Include="External\ImGUI\imgui_internal.h" />
+    <ClInclude Include="External\ImGUI\imgui_stdlib.h" />
+    <ClInclude Include="External\ImGUI\implot.h" />
+    <ClInclude Include="External\ImGUI\implot_internal.h" />
+    <ClInclude Include="External\ImGUI\imstb_rectpack.h" />
+    <ClInclude Include="External\ImGUI\imstb_textedit.h" />
+    <ClInclude Include="External\ImGUI\imstb_truetype.h" />
+    <ClInclude Include="External\sglx\SglxApi.h" />
+    <ClInclude Include="External\sglx\SglxCppClient.h" />
+    <ClInclude Include="External\tinyfiledialogs\tinyfiledialogs.h" />
+    <ClInclude Include="src\Gui\OutputGui.h" />
+    <ClInclude Include="src\SpikeSorter\myCublasError.h" />
+    <ClInclude Include="src\SpikeSorter\LiveSorterMemoryList.h" />
+    <ClInclude Include="src\SpikeSorter\LiveSorter.h" />
+    <ClInclude Include="src\SpikeSorter\DriftEstimator.h" />
+    <ClInclude Include="src\SpikeSorter\DriftFingerprint.h" />
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="External\CNPY\cnpy.h" />
+    <ClInclude Include="src\Decoder\dataBinner.h" />
+    <ClInclude Include="src\Gui\InputGui.h" />
+    <ClInclude Include="src\Gui\OutputGuiTab.h" />
+    <ClInclude Include="src\Helpers\GuiHelpers.h" />
+    <ClInclude Include="src\Networking\FragmentManager.h" />
+    <ClInclude Include="src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\SglxApi.h" />
+    <ClInclude Include="src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\SglxCppClient.h" />
+    <ClInclude Include="src\SpikeSorter\dataSocket.h" />
+    <ClInclude Include="src\Decoder\Decoder.h" />
+    <ClInclude Include="src\Decoder\SdmProcessor.h" />
+    <ClInclude Include="src\Decoder\ZScoreSdmProcessor.h" />
+    <ClInclude Include="src\Decoder\ClosedLoopSdmProcessor.h" />
+    <ClInclude Include="src\Decoder\SdmParams.h" />
+    <ClInclude Include="src\Decoder\LogRegSdmProcessor.h" />
+    <ClInclude Include="src\Decoder\BinCountSdmProcessor.h" />
+    <ClInclude Include="src\Helpers\FileWriter.h" />
+    <ClInclude Include="src\Gui\Gui.h" />
+    <ClInclude Include="src\Helpers\TimeHelpers.h" />
+    <ClInclude Include="src\SpikeSorter\mockStreamDataSocket.h" />
+    <ClInclude Include="src\SpikeSorter\SorterHelpers.h" />
+    <ClInclude Include="src\SpikeSorter\myGPUhelpers.h" />
+    <ClInclude Include="src\SpikeSorter\myCudnnConvolution.h" />
+    <ClInclude Include="src\NetClient\NetClient.h" />
+    <ClInclude Include="src\NetClient\Socket.h" />
+    <ClInclude Include="src\Networking\inputParameters.h" />
+    <ClInclude Include="src\Networking\NetworkHelpers.h" />
+    <ClInclude Include="src\Networking\spikesPayload.h" />
+    <ClInclude Include="src\Networking\SerializationHelpers.h" />
+    <ClInclude Include="src\Networking\Sock.h" />
+    <ClInclude Include="src\Networking\SpikeStream.h" />
+    <ClInclude Include="src\Networking\sorterParameters.h" />
+    <ClInclude Include="src\Helpers\Utils.h" />
+    <ClInclude Include="src\SpikeSorter\TensorWrapper.h" />
+    <ClInclude Include="src\SpikeSorter\ThresholdCrossing.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="LiveSpikeSorter.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="External\ImGUI\imgui.ini" />
+    <None Include="README.md" />
+    <None Include="src\Matlab\configFile384.m" />
+    <None Include="src\Matlab\cropAndSort.m" />
+    <None Include="src\Matlab\cropBin.m" />
+    <None Include="src\Matlab\DataBinner.m" />
+    <None Include="src\Matlab\getBestKMask.m" />
+    <None Include="src\Matlab\libsvmread.mexw64" />
+    <None Include="src\Matlab\libsvmwrite.mexw64" />
+    <None Include="src\Matlab\splitTrainTest.m" />
+    <None Include="src\Matlab\cropSpikeSorterInput.m" />
+    <None Include="src\Matlab\extractDecodeLabels.m" />
+    <None Include="src\Matlab\main_kilosort3.m" />
+    <None Include="src\Matlab\neuropixPhase3A_kilosortChanMap.mat" />
+    <None Include="src\Matlab\svmpredict.mexw64" />
+    <None Include="src\Matlab\svmtrain.mexw64" />
+    <None Include="src\Matlab\udpTest.m" />
+    <None Include="src\Matlab\sdm_bincounts_receiver.m" />
+  </ItemGroup>
+  <ItemGroup>
+    <Font Include="External\ImGUI\fonts\Cousine-Regular.ttf" />
+    <Font Include="External\ImGUI\fonts\DroidSans.ttf" />
+    <Font Include="External\ImGUI\fonts\Karla-Regular.ttf" />
+    <Font Include="External\ImGUI\fonts\ProggyClean.ttf" />
+    <Font Include="External\ImGUI\fonts\ProggyTiny.ttf" />
+    <Font Include="External\ImGUI\fonts\Roboto-Medium.ttf" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="src\ExtraFiles\brain.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <Library Include="External\sglx\libSglxApi.a" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 11.8.targets" />
+  </ImportGroup>
+</Project>

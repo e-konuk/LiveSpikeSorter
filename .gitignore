@@ -275,18 +275,8 @@ doc/
 Python/
 
 !src/Python/
-!src/Python/run_online_spikes.py
+!src/Python/run_lss.py
 
-# The Python environment spec is source, despite the global *.txt rule above.
-# Root-anchored: there is exactly one, at the repo root.
-!/requirements.txt
-
-# The vendored Kilosort fork (External/Kilosort) is source, not build output.
-# Keep its bundled template file despite the global *.npz rule above.
-!External/Kilosort/kilosort/wTEMP.npz
-# ...but pip build artifacts from installing it are not source.
-External/Kilosort/build/
-External/Kilosort/*.egg-info/
 src/Python/.ipynb_checkpoints/
 src/Python/run_phy/
 
@@ -296,8 +286,9 @@ methods_section_draft.txt
 # Claude Code
 .claude/
 
-# Vendored Kilosort fork
-/External/Kilosort/build/
-/External/Kilosort/kilosort.egg-info/
-# Keep package data assets the global *.npz / *.npy rules would drop
-!/External/Kilosort/kilosort/wTEMP.npz
+
+# Prebuilt LiveSpikeSorter.exe from GitHub Releases
+/bin/
+
+# Created by `pip install -e .`
+*.egg-info/

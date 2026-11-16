@@ -45,7 +45,7 @@ Update an existing environment with:
 
 ## Installing LSS
 
-Download `LiveSpikeSorter-vX.Y.Z-win64.zip` from the [Releases](https://github.com/e-konuk/LiveSpikeSorter/releases/tag/v1.0.0) page and extract all its contents into `<repo>\bin\`, so that you have `<repo>\bin\LiveSpikeSorter.exe`. 
+Download [`LiveSpikeSorter-win64.zip`](https://github.com/e-konuk/LiveSpikeSorter/releases/latest/download/LiveSpikeSorter-win64.zip) and extract its files into `<repo>\bin\prebuilt\`, so that you have `<repo>\bin\prebuilt\LiveSpikeSorter.exe`. 
 
 ## Running LSS 
 
@@ -66,7 +66,7 @@ Needed if you change the C++/CUDA code.
    - Copy include\*.h to C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include\
    - Copy lib\x64\*.lib to C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\lib\x64\
 3. Open `LiveSpikeSorter.vcxproj`, select  **Release | x64** and build the solution.  
-4. If successful, you should see output in `<repo>\x64\RELEASE\LiveSpikeSorter.exe`. The launcher will prioritize this build.
+4. If successful, you should see output in `<repo>\bin\build\LiveSpikeSorter.exe`. The launcher uses this build over `bin\prebuilt\`, and prints which exe it is using.
 
 
 ## Real-Time Output

@@ -44,12 +44,11 @@ This installs Python (3.10 – 3.12), PyTorch with CUDA 11.8, Kilosort 4.0.13, a
 
 ### A5. DOWNLOAD LSS
 
-Download `LiveSpikeSorter-vX.Y.Z-win64.zip` from the [Releases](https://github.com/MShreyasStanford/LiveSpikeSorter/releases) page, and extract it into `<repo>\bin\`:
+Download [`LiveSpikeSorter-win64.zip`](https://github.com/e-konuk/LiveSpikeSorter/releases/latest/download/LiveSpikeSorter-win64.zip) (the latest release; older versions are on the [Releases](https://github.com/e-konuk/LiveSpikeSorter/releases) page) and extract its files into `<repo>\bin\prebuilt\`, so that you have:
 
 ```
-<repo>\bin\LiveSpikeSorter.exe
+<repo>\bin\prebuilt\LiveSpikeSorter.exe
 ```
-
 ---
 
 ## PART B -- Session Workflow

@@ -784,18 +784,24 @@ def main():
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 EXE_NAME = "LiveSpikeSorter.exe"
+RELEASE_ZIP_URL = "https://github.com/e-konuk/LiveSpikeSorter/releases/latest/download/LiveSpikeSorter-win64.zip"
 
 def find_lss_exe():
-    """LSS_EXE if set, else a local source build, else a release zip extracted into bin/."""
-    candidates = [REPO_ROOT / "x64" / "RELEASE" / EXE_NAME, REPO_ROOT / "bin" / EXE_NAME]
+    """LSS_EXE if set, else a local source build (bin/build), else a downloaded release (bin/prebuilt)."""
+    candidates = [REPO_ROOT / "bin" / "build" / EXE_NAME, REPO_ROOT / "bin" / "prebuilt" / EXE_NAME]
     if os.environ.get("LSS_EXE"):
         candidates.insert(0, Path(os.environ["LSS_EXE"]))
     for exe in candidates:
         if exe.is_file():
+            print(f"Using {exe}")
             return exe
-    sys.exit(f"{EXE_NAME} not found. Download it from the GitHub Releases page and extract it "
-             f"into {REPO_ROOT / 'bin'}, or build it from source (see README.md). "
-             f"Looked in:\n  " + "\n  ".join(str(c) for c in candidates))
+    # Locations used before bin/build and bin/prebuilt
+    old = [p for p in (REPO_ROOT / "x64" / "RELEASE" / EXE_NAME, REPO_ROOT / "bin" / EXE_NAME) if p.is_file()]
+    hint = (f"\nFound an exe in an old location ({old[0]}). Rebuild from source, or move a downloaded "
+            f"release's files into {REPO_ROOT / 'bin' / 'prebuilt'}.") if old else ""
+    sys.exit(f"{EXE_NAME} not found. Download {RELEASE_ZIP_URL} and extract its files into "
+             f"{REPO_ROOT / 'bin' / 'prebuilt'}, or build it from source (see README.md). "
+             f"Looked in:\n  " + "\n  ".join(str(c) for c in candidates) + hint)
 
 def exe_version(exe):
     """Version marker that main.cpp compiles into the exe, read without starting it."""

@@ -47,19 +47,20 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $version = (Get-Content VERSION -Raw).Trim()
           $dist = "dist\LiveSpikeSorter"
           New-Item -ItemType Directory -Force $dist | Out-Null
           # The exe and the SpikeGLX API DLL (with its MinGW runtime). The CUDA and cuDNN
           # DLLs come from the conda environment, see environment.yml.
-          Copy-Item x64\RELEASE\LiveSpikeSorter.exe, `
-                    x64\RELEASE\SglxApi.dll, `
-                    x64\RELEASE\libgcc_s_seh-1.dll, `
-                    x64\RELEASE\libstdc++-6.dll, `
-                    x64\RELEASE\libwinpthread-1.dll, `
+          Copy-Item bin\build\LiveSpikeSorter.exe, `
+                    bin\build\SglxApi.dll, `
+                    bin\build\libgcc_s_seh-1.dll, `
+                    bin\build\libstdc++-6.dll, `
+                    bin\build\libwinpthread-1.dll, `
                     LICENSE $dist
-          Compress-Archive "$dist\*" "dist\LiveSpikeSorter-v$version-win64.zip"
-          "ZIP=dist\LiveSpikeSorter-v$version-win64.zip" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          # No version in the name, so .../releases/latest/download/LiveSpikeSorter-win64.zip
+          # always works; the version is in the tag and compiled into the exe.
+          Compress-Archive "$dist\*" "dist\LiveSpikeSorter-win64.zip"
+          "ZIP=dist\LiveSpikeSorter-win64.zip" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       - uses: actions/upload-artifact@v4
         with:

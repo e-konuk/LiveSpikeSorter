@@ -52,11 +52,17 @@
 
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <!-- The launcher looks for the exe in bin\build\ (and bin\prebuilt\ for downloaded releases) -->
+    <OutDir>$(MSBuildThisFileDirectory)bin\debug\</OutDir>
+    <IntDir>$(MSBuildThisFileDirectory)obj\$(Configuration)\</IntDir>
     <LinkIncremental>true</LinkIncremental>
     <LibraryPath>$(LibraryPath)</LibraryPath>
     <ExecutablePath>$(ExecutablePath)</ExecutablePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RELEASE|x64'">
+    <!-- The launcher looks for the exe in bin\build\ (and bin\prebuilt\ for downloaded releases) -->
+    <OutDir>$(MSBuildThisFileDirectory)bin\build\</OutDir>
+    <IntDir>$(MSBuildThisFileDirectory)obj\$(Configuration)\</IntDir>
     <LinkIncremental>false</LinkIncremental>
     <LibraryPath>$(LibraryPath)</LibraryPath>
     <ExecutablePath>$(ExecutablePath)</ExecutablePath>

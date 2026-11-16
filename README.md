@@ -37,7 +37,7 @@ conda env create -f environment.yml
 conda activate lss
 ```
 
-This installs Python, PyTorch (CUDA 11.8 build), Kilosort 4.0.13, and the CUDA 11.8 / cuDNN 8.9.7 libraries LSS runs on, so no separate CUDA or cuDNN install is needed.
+This installs Python, PyTorch (CUDA 11.8 build), Kilosort 4.0.13, and the CUDA 11.8 / cuDNN 8.9.7 libraries LSS runs on.
 
 Update an existing environment with:
 

@@ -287,8 +287,16 @@ methods_section_draft.txt
 .claude/
 
 
-# Prebuilt LiveSpikeSorter.exe from GitHub Releases
-/bin/
+# LiveSpikeSorter.exe: bin/prebuilt (downloaded release) and bin/build (source build).
+# Only the README.txt placeholders are tracked, so the folders exist after cloning.
+!/bin/
+/bin/*
+!/bin/prebuilt/
+!/bin/build/
+/bin/prebuilt/*
+/bin/build/*
+!/bin/prebuilt/README.txt
+!/bin/build/README.txt
 
 # Created by `pip install -e .`
 *.egg-info/

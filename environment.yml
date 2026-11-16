@@ -1,10 +1,12 @@
 # Live Spike Sorter (LSS) Python environment.
-#
+
+# Usage:
 #   conda env create -f environment.yml
 #   conda activate lss
-#
-# Update an existing environment after pulling:
+
+# To update an existing environbment with changes to this file, run:
 #   conda env update -f environment.yml --prune
+
 name: lss
 channels:
   - conda-forge
@@ -21,17 +23,14 @@ dependencies:
   - pyqt=5
   - qtpy
   - pyqtgraph>=0.13
-  # CUDA runtime libraries for LiveSpikeSorter.exe (cuBLAS, cuFFT, cuSOLVER, NPP,
-  # cuDNN). `conda activate lss` puts them on PATH, so no NVIDIA installer is
-  # needed just to run LSS. cuda-version picks the CUDA 11 build of cuDNN.
+  # CUDA runtime libraries
   - cuda-version=11.8
   - cudatoolkit=11.8
   - cudnn=8.9.7
   - pip:
       - --extra-index-url https://download.pytorch.org/whl/cu118
       - torch==2.7.1+cu118
-      # Stock Kilosort; LSS's training additions are in src/Python/lss_kilosort.py,
-      # which is pinned to this exact version.
+      # Stock Kilosort
       - kilosort==4.0.13
       - spikeinterface
       - probeinterface

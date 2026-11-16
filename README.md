@@ -14,20 +14,20 @@ Live Spike Sorter (LSS) is a GPU-accelerated real-time spike sorter for extracel
 | :---- | :---- |
 | **NVIDIA GPU** | Compute capability 7.5 (Turing) through 8.9 (Ada). |
 | **NVIDIA driver** | 522.06 or newer |
+| **Python** | 3.10 – 3.12 (installed by conda) |
 | **CUDA** | 11.8 (installed by conda) |
 | **cuDNN** | 8.9.7 (installed by conda) |
-| **Python** | 3.10 – 3.12 (installed by conda) |
+| **Kilosort4** | 4.0.13 from PyPI (installed by conda)|
 | **SpikeGLX** | Latest release |
-| **Kilosort4** | 4.0.13 from PyPI |
-| **CPU** | Your processor should not be a bottleneck so long as your device [can run Kilosort](https://kilosort.readthedocs.io/en/latest/hardware.html). If SpikeGLX aquistion is also on the same machine, we refer to their [hardware requirements](https://github.com/billkarsh/SpikeGLX/blob/master/Markdown/SystemRequirements_PXI.md)
+| **CPU** | Your processor should not be a bottleneck so long as your device [can run Kilosort](https://kilosort.readthedocs.io/en/latest/hardware.html). <br> If SpikeGLX aquistion is also on the same machine, we refer to their [hardware requirements](https://github.com/billkarsh/SpikeGLX/blob/master/Markdown/SystemRequirements_PXI.md)
 | **RAM** | Same as above
 
 ## Python Setup
 
-Install an Anaconda distribution of Python, then clone the repository:
+Install an Anaconda distribution of Python (ex: [miniforge](https://github.com/conda-forge/miniforge)), then clone the repository:
 
 ```bash
-git clone https://github.com/e-konuk/LiveSpikeSorter.git
+git clone -b lss-packaging https://github.com/e-konuk/LiveSpikeSorter.git
 cd LiveSpikeSorter
 ```
 
@@ -45,7 +45,7 @@ Update an existing environment with:
 
 ## Installing LSS
 
-Download `LiveSpikeSorter-vX.Y.Z-win64.zip` from the [Releases](https://github.com/e-konuk/LiveSpikeSorter/releases/tag/v1.0.0) page and extract it into `<repo>\bin\`, so that you have `<repo>\bin\LiveSpikeSorter.exe`. Use the release that matches your checkout (`git checkout vX.Y.Z`); the launcher warns if the exe and the repository versions differ.
+Download `LiveSpikeSorter-vX.Y.Z-win64.zip` from the [Releases](https://github.com/e-konuk/LiveSpikeSorter/releases/tag/v1.0.0) page and extract all its contents into `<repo>\bin\`, so that you have `<repo>\bin\LiveSpikeSorter.exe`. 
 
 ## Running LSS 
 
@@ -58,17 +58,10 @@ The GUI lets you configure one or more sorter instances, select Kilosort output 
 
 ## Building from Source
 
-Only needed if you change the C++/CUDA code.
+Needed if you change the C++/CUDA code. 
 
 1. Install Visual Studio 2022 (Build Tools, `v143` toolset), then the [CUDA 11.8 toolkit](https://developer.nvidia.com/cuda-11-8-0-download-archive). Check that `CUDA_PATH` points to it (e.g. `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8`).  
-2. cuDNN comes from the `lss` environment. Point the build at it and open the solution from an activated prompt:
-
-   ```bash
-   conda activate lss
-   set CUDNN_PATH=%CONDA_PREFIX%\Library
-   devenv LiveSpikeSorter.sln
-   ```
-
+2. Install cuDNN v8.9.7 from the [cuDNN Archive](https://developer.nvidia.com/rdp/cudnn-archive)
 3. Open `LiveSpikeSorter.vcxproj`, select  **Release | x64** and build the solution.  
 4. If successful, you should see output in `<repo>\x64\RELEASE\LiveSpikeSorter.exe`. The launcher will prioritize this build.
 

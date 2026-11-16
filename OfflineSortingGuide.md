@@ -24,20 +24,16 @@ Clone the LSS repo somewhere convenient and check out the release you want. Conv
 C:\Users\<you>\source\repos\LiveSpikeSorter\
 ```
 
-```
-git checkout vX.Y.Z
-```
-
 ### A3. INSTALL SpikeGLX
 
 SpikeGLX is an external dependency, downloaded separately.
 
 - Download the latest release from <http://billkarsh.github.io/SpikeGLX/>, e.g. `App/Release_v20251218-api4.zip`
-- The extracted files contain two executables: `SpikeGLX_STD.exe` (needs NI-DAQmx drivers) and `SpikeGLX_STD_NISIM.exe` (no NI dependency). For offline replay with no NI hardware, you can use `SpikeGLX_STD_NISIM.exe`.
+- The extracted files contain two executables: `SpikeGLX_STD.exe` (needs NI-DAQ drivers) and `SpikeGLX_STD_NISIM.exe` (no such dependency). For offline replay with no NI hardware, you can use the latter.
 
 ### A4. PYTHON ENVIRONMENT SETUP
 
-Install [Miniforge](https://github.com/conda-forge/miniforge) (or any conda distribution). Then, from the repo root you cloned in A2, open a Miniforge Prompt and run:
+You can use [Miniforge](https://github.com/conda-forge/miniforge) (or any conda distribution). Then, from the repo root you cloned in A2, open a Miniforge Prompt and run:
 
 ```
 conda env create -f environment.yml
@@ -82,7 +78,7 @@ BASE_PATH/
         └── ...t0.imec0.ap.meta    <- Metadata
 ```
 
-### B3. RUN KILOSORT 4 TO PRODUCE TEMPLATES
+### B3. RUN KILOSORT TO PRODUCE TEMPLATES
 
 LSS does not learn templates online. You must run Kilosort4 on the recording first to produce templates, the whitening matrix, drift matrices, etc.
 
@@ -139,7 +135,7 @@ Once `oss_input/` is populated, subsequent LSS runs on the same recording can sk
 
 ### B5. START SpikeGLX WITH A SIMULATED PROBE REPLAYING YOUR .ap.bin
 
-1. Launch `SpikeGLX_STD_NISIM.exe` (or `SpikeGLX_STD.exe` if you have NI drivers installed).
+1. Launch `SpikeGLX_STD_NISIM.exe`
 
 2. Open the Configure Acquisition dialog (File -> New Acquisition).
 
@@ -151,25 +147,15 @@ Once `oss_input/` is populated, subsequent LSS runs on the same recording can sk
 
 4. Click detect, then verify and save the configuration. Press "Run" and SpikeGLX should transition into a streaming/acquisition state.
 
-5. Open Options -> Command Server Settings. Set:
-
-   ```
-   IP Address: 127.0.0.1
-   Port:       4142
-   ```
-
-   Enable the server. Leave SpikeGLX running.
+5. Open Options -> Command Server Settings. Set your `<ip>:<port>`. Enable the server. Leave SpikeGLX running.
 
 ### B6. LAUNCH LSS AND POINT IT AT THE SAME 127.0.0.1:4142
 
-Ensure your IP Address and Port are matching (if needed, relaunch):
+Ensure your IP Address and Port are matching in the launcher:
 
 ```
-conda activate lss
 lss
 ```
-
-LSS launches automatically after Kilosort completes.
 
 ### B7. VERIFY OUTPUT
 
@@ -188,11 +174,7 @@ E.g.:
 
 ### B8. EXITING
 
-The sorter does not auto-exit when the `.ap.bin` runs out -- SpikeGLX keeps the stream "running" until you stop it. To end the session:
-
-1. In SpikeGLX, press Stop to end the run.
-2. In LSS, close the LSS windows.
-
+The sorter does not auto-exit when the `.ap.bin` runs out -- SpikeGLX will repeat the stream until you stop it. 
 ---
 
 ## What Gets Written During Sorting

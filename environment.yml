@@ -4,7 +4,7 @@
 #   conda env create -f environment.yml
 #   conda activate lss
 
-# To update an existing environbment with changes to this file, run:
+# To update an existing environment with changes to this file, run:
 #   conda env update -f environment.yml --prune
 
 name: lss

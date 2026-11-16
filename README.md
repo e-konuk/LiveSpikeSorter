@@ -31,7 +31,7 @@ git clone -b lss-packaging https://github.com/e-konuk/LiveSpikeSorter.git
 cd LiveSpikeSorter
 ```
 
-Then create your enviornment and install dependencies:
+Then create your environment and install dependencies:
 ```bash
 conda env create -f environment.yml
 conda activate lss
@@ -61,7 +61,10 @@ The GUI lets you configure one or more sorter instances, select Kilosort output 
 Needed if you change the C++/CUDA code. 
 
 1. Install Visual Studio 2022 (Build Tools, `v143` toolset), then the [CUDA 11.8 toolkit](https://developer.nvidia.com/cuda-11-8-0-download-archive). Check that `CUDA_PATH` points to it (e.g. `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8`).  
-2. Install cuDNN v8.9.7 from the [cuDNN Archive](https://developer.nvidia.com/rdp/cudnn-archive)
+2. Install cuDNN v8.9.7 from the [cuDNN Archive](https://developer.nvidia.com/rdp/cudnn-archive). After downloading the cuDNN zip from NVIDIA:
+   - Copy bin\*.dll to C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\bin\
+   - Copy include\*.h to C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include\
+   - Copy lib\x64\*.lib to C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\lib\x64\
 3. Open `LiveSpikeSorter.vcxproj`, select  **Release | x64** and build the solution.  
 4. If successful, you should see output in `<repo>\x64\RELEASE\LiveSpikeSorter.exe`. The launcher will prioritize this build.
 

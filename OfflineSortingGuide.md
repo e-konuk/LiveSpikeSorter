@@ -18,7 +18,7 @@ nvidia-smi
 
 ### A2. CLONE THE LSS REPO
 
-Clone the LSS repo somewhere convenient and check out the release you want. Conventional location:
+Clone the LSS repo somewhere. Conventional location:
 
 ```
 C:\Users\<you>\source\repos\LiveSpikeSorter\
@@ -44,7 +44,7 @@ This installs Python (3.10 – 3.12), PyTorch with CUDA 11.8, Kilosort 4.0.13, a
 
 ### A5. DOWNLOAD LSS
 
-Download `LiveSpikeSorter-vX.Y.Z-win64.zip` for the version you checked out in A2 from the [Releases](https://github.com/MShreyasStanford/LiveSpikeSorter/releases) page, and extract it into `<repo>\bin\`:
+Download `LiveSpikeSorter-vX.Y.Z-win64.zip` from the [Releases](https://github.com/MShreyasStanford/LiveSpikeSorter/releases) page, and extract it into `<repo>\bin\`:
 
 ```
 <repo>\bin\LiveSpikeSorter.exe
@@ -149,7 +149,7 @@ Once `oss_input/` is populated, subsequent LSS runs on the same recording can sk
 
 5. Open Options -> Command Server Settings. Set your `<ip>:<port>`. Enable the server. Leave SpikeGLX running.
 
-### B6. LAUNCH LSS AND POINT IT AT THE SAME 127.0.0.1:4142
+### B6. LAUNCH LSS AND POINT IT AT THE SAME IP AND PORT
 
 Ensure your IP Address and Port are matching in the launcher:
 
@@ -174,8 +174,7 @@ E.g.:
 
 ### B8. EXITING
 
-The sorter does not auto-exit when the `.ap.bin` runs out -- SpikeGLX will repeat the stream until you stop it. 
----
+The sorter does not auto-exit when the `.ap.bin` runs out -- SpikeGLX will repeat the stream until you stop it.
 
 ## What Gets Written During Sorting
 

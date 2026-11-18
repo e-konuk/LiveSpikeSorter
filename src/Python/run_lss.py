@@ -1162,6 +1162,7 @@ def run_kilosort_with_drift_plots(settings, probe_name=None, results_dir=None,
         data_dtype = 'int16'
     if device is None:
         device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    lss_kilosort.limit_torch_to_free_vram(device)
     if probe['chanMap'].max() >= settings['n_chan_bin']:
         raise ValueError(
             'Largest value of chanMap exceeds channel count of data, '

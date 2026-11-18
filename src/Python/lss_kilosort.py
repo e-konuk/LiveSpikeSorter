@@ -32,6 +32,22 @@ def check_kilosort_version():
             f"Install it with: pip install kilosort=={KILOSORT_VERSION}")
 
 
+def limit_torch_to_free_vram(device, margin_gb=0.25):
+    """
+    Cap's PyTorch vram usage
+        - Kilosort would freeze because PyTorch would try to allocate more than free vram
+    """
+    if device.type != 'cuda':
+        return None
+    index = device.index if device.index is not None else torch.cuda.current_device()
+    free, total = torch.cuda.mem_get_info(index)
+    limit = max(free - margin_gb * 1024**3, 0.1 * total)
+    torch.cuda.set_per_process_memory_fraction(limit / total, index)
+    print(f"PyTorch GPU memory capped at {limit / 1024**3:.2f} GB "
+          f"({free / 1024**3:.2f} of {total / 1024**3:.2f} GB free)")
+    return limit
+
+
 @contextmanager
 def grouped_car(car_groups):
     """

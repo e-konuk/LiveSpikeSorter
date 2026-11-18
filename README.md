@@ -58,7 +58,7 @@ The GUI lets you configure one or more sorter instances, select Kilosort output 
 
 ## Building from Source
 
-Needed if you change the C++/CUDA code. 
+Needed ONLY if you change the C++/CUDA code. 
 
 1. Install Visual Studio 2022 (Build Tools, `v143` toolset), then the [CUDA 11.8 toolkit](https://developer.nvidia.com/cuda-11-8-0-download-archive). Check that `CUDA_PATH` points to it (e.g. `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8`).  
 2. Install cuDNN v8.9.7 from the [cuDNN Archive](https://developer.nvidia.com/rdp/cudnn-archive). After downloading the cuDNN zip from NVIDIA:

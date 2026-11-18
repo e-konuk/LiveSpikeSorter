@@ -931,7 +931,7 @@ void findMatchingIndices(const float* d_Cfmaxpool,
 	long T, int currBatchNumSamples, long M,
 	thrust::device_vector<long>& matching_indices, int* d_count)
 {
-	static const char* ptLabel = { "OnlineSpikesV2::find_matching_indices_custom" };
+	static const char* ptLabel = { "LiveSorter::find_matching_indices_custom" };
 
 	// Total number of elements in d_Cf.
 	int N = T * currBatchNumSamples;
@@ -980,7 +980,7 @@ void findMatchingIndices(const float* d_Cfmaxpool,
 
 
 void medianRemove(float* data, int C, int currBatchNumSamples) {
-	static const char* ptLabel = { "OnlineSpikesV2::removeMedianHost" };
+	static const char* ptLabel = { "LiveSorter::removeMedianHost" };
 
 	int blockSize = MAX_CHANNELS; // algorithm operates on fixed number of entries
 	int numBlocks = currBatchNumSamples;

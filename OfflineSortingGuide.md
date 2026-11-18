@@ -6,93 +6,49 @@ This guide covers running the Live Spike Sorter (LSS) against a previously recor
 
 ## A - One-Time Machine Setup
 
-You only need to do these steps once per machine. Skip to [A6](#a6-install-python-310--environment-setup) if all your prerequisites are installed. Skip to [PART B](#part-b----session-workflow) if your machine is already set up.
+You only need to do these steps once per machine. Skip to [PART B](#part-b----session-workflow) if your machine is already set up. You do not need Visual Studio, the CUDA toolkit, or cuDNN unless you want to build LSS from source (see the README).
 
-### A1. INSTALL VISUAL STUDIO 2022
+### A1. CHECK YOUR GPU DRIVER
 
-LSS builds with VS2022 Build Tools and the v143 platform toolset. Other VS versions are not supported by the `.vcxproj`.
+LSS needs an NVIDIA GPU with compute capability 7.5 to 8.9 (RTX 20-, 30- and 40-series and their workstation equivalents) and driver 522.06 or newer. Check with:
 
-- Install Visual Studio 2022 Build Tools (Community is fine too).
-- Under "Workloads", check "Desktop development with C++".
-- Under "Individual components", make sure these are selected:
-  - MSVC v143 - VS 2022 C++ x64/x86 build tools
-  - Windows 10 SDK 10.0.17763.0
+```
+nvidia-smi
+```
 
-### A2. INSTALL CUDA 11.8
+### A2. CLONE THE LSS REPO
 
-LSS targets CUDA 11.8 specifically.
-
-- Download the CUDA 11.8 installer from NVIDIA's archive.
-- Install with default options *after* Visual Studio 2022 is already installed (or rerun the CUDA installer's "Visual Studio Integration" component afterward) so its MSBuild integration files land in VS2022's BuildCustomizations folder automatically. Default path:
-
-  ```
-  C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\
-  ```
-
-- Verify the system environment variable `CUDA_PATH` points there with:
-
-  ```
-  echo %CUDA_PATH%
-  ```
-
-  - Alternatively, search for "edit the system environment variables" using Windows search, open it, click "Environment Variables" under the Advanced tab and ensure `CUDA_PATH` is listed with the correct path under System Variables:
-
-    | Variable | Value |
-    |----------|-------|
-    | `CUDA_PATH` | `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8` |
-
-### A3. INSTALL cuDNN 8.x
-
-Use a cuDNN 8.x release compatible with CUDA 11.8.
-
-After downloading the cuDNN zip from NVIDIA:
-
-- Copy `bin\*.dll` to `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\bin\`
-- Copy `include\*.h` to `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\include\`
-- Copy `lib\x64\*.lib` to `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8\lib\x64\`
-
-### A4. CLONE THE LSS REPO
-
-Clone the LSS repo somewhere convenient. Conventional location:
+Clone the LSS repo somewhere. Conventional location:
 
 ```
 C:\Users\<you>\source\repos\LiveSpikeSorter\
 ```
 
-### A5. INSTALL SpikeGLX
+### A3. INSTALL SpikeGLX
 
 SpikeGLX is an external dependency, downloaded separately.
 
 - Download the latest release from <http://billkarsh.github.io/SpikeGLX/>, e.g. `App/Release_v20251218-api4.zip`
-- The extracted files contain two executables: `SpikeGLX_STD.exe` (needs NI-DAQmx drivers) and `SpikeGLX_STD_NISIM.exe` (no NI dependency). For offline replay with no NI hardware, you can use `SpikeGLX_STD_NISIM.exe`.
+- The extracted files contain two executables: `SpikeGLX_STD.exe` (needs NI-DAQ drivers) and `SpikeGLX_STD_NISIM.exe` (no such dependency). For offline replay with no NI hardware, you can use the latter.
 
-### A6. INSTALL PYTHON 3.10 + ENVIRONMENT SETUP
+### A4. PYTHON ENVIRONMENT SETUP
 
-Install Python 3.10 from python.org. Our dependencies do not currently support newer versions.
-
-- At install time, leave "Add Python to PATH" checked.
-
-Then create a virtual environment and install the dependencies. Run these from the repo root you cloned in A4:
+You can use [Miniforge](https://github.com/conda-forge/miniforge) (or any conda distribution). Then, from the repo root you cloned in A2, open a Miniforge Prompt and run:
 
 ```
-py -3.10 -m venv venv
-
-venv\Scripts\activate
-pip install -r requirements.txt
+conda env create -f environment.yml
+conda activate lss
 ```
 
-### A7. BUILD LSS (Release | x64)
+This installs Python (3.10 – 3.12), PyTorch with CUDA 11.8, Kilosort 4.0.13, and the CUDA 11.8 / cuDNN 8.9.7 libraries that LSS runs on.
 
-Open `OnlineSpikes.vcxproj` in VS2022. Set the configuration dropdown to:
+### A5. DOWNLOAD LSS
+
+Download [`LiveSpikeSorter-win64.zip`](https://github.com/e-konuk/LiveSpikeSorter/releases/latest/download/LiveSpikeSorter-win64.zip) (the latest release; older versions are on the [Releases](https://github.com/e-konuk/LiveSpikeSorter/releases) page) and extract its files into `<repo>\bin\prebuilt\`, so that you have:
 
 ```
-Release  |  x64
+<repo>\bin\prebuilt\LiveSpikeSorter.exe
 ```
-
-Then Build -> Rebuild Solution.
-
-Output: `<repo>\x64\RELEASE\OnlineSpikes.exe`
-
 ---
 
 ## PART B -- Session Workflow
@@ -121,15 +77,14 @@ BASE_PATH/
         └── ...t0.imec0.ap.meta    <- Metadata
 ```
 
-### B3. RUN KILOSORT 4 TO PRODUCE TEMPLATES
+### B3. RUN KILOSORT TO PRODUCE TEMPLATES
 
 LSS does not learn templates online. You must run Kilosort4 on the recording first to produce templates, the whitening matrix, drift matrices, etc.
 
 (Ensure your environment is activated)
 
 ```
-cd <repo>\src\Python
-python run_online_spikes.py
+lss
 ```
 
 A GUI appears. For each sorter/probe, fill in:
@@ -179,7 +134,7 @@ Once `oss_input/` is populated, subsequent LSS runs on the same recording can sk
 
 ### B5. START SpikeGLX WITH A SIMULATED PROBE REPLAYING YOUR .ap.bin
 
-1. Launch `SpikeGLX_STD_NISIM.exe` (or `SpikeGLX_STD.exe` if you have NI drivers installed).
+1. Launch `SpikeGLX_STD_NISIM.exe`
 
 2. Open the Configure Acquisition dialog (File -> New Acquisition).
 
@@ -191,25 +146,15 @@ Once `oss_input/` is populated, subsequent LSS runs on the same recording can sk
 
 4. Click detect, then verify and save the configuration. Press "Run" and SpikeGLX should transition into a streaming/acquisition state.
 
-5. Open Options -> Command Server Settings. Set:
+5. Open Options -> Command Server Settings. Set your `<ip>:<port>`. Enable the server. Leave SpikeGLX running.
 
-   ```
-   IP Address: 127.0.0.1
-   Port:       4142
-   ```
+### B6. LAUNCH LSS AND POINT IT AT THE SAME IP AND PORT
 
-   Enable the server. Leave SpikeGLX running.
-
-### B6. LAUNCH LSS AND POINT IT AT THE SAME 127.0.0.1:4142
-
-Ensure your IP Address and Port are matching (if needed, relaunch):
+Ensure your IP Address and Port are matching in the launcher:
 
 ```
-cd <repo>\src\Python
-py -3.10 run_online_spikes.py
+lss
 ```
-
-LSS launches automatically after Kilosort completes.
 
 ### B7. VERIFY OUTPUT
 
@@ -228,12 +173,7 @@ E.g.:
 
 ### B8. EXITING
 
-The sorter does not auto-exit when the `.ap.bin` runs out -- SpikeGLX keeps the stream "running" until you stop it. To end the session:
-
-1. In SpikeGLX, press Stop to end the run.
-2. In LSS, close the LSS windows.
-
----
+The sorter does not auto-exit when the `.ap.bin` runs out -- SpikeGLX will repeat the stream until you stop it.
 
 ## What Gets Written During Sorting
 
@@ -245,18 +185,9 @@ BASE_PATH/
 +-- cuda_output/               <- WRITTEN CONTINUOUSLY by the GPU sorter
 |   +-- spikeOutput.txt        Each line: sample_time, template_id,
 |                              amplitude, y_position
-+-- decoder_input/             <- Used by decoder if decoding is enabled
-    +-- spikeOutput.txt
++-- decoder_input/             <- Spike output of this session; a later session's
+    +-- spikeOutput.txt           logreg SDM processor can train on it
 ```
-
-If decoding is enabled (`bIsDecoding=true`), the decoder ALSO writes:
-
-| File | Description |
-|------|-------------|
-| `binnedSpikes.txt` | Binned spike counts for training (once) |
-| `binnedSpikesScaled.txt` | Normalized version of above (once) |
-| `predictions.txt` | Decoder predictions, continuous |
-| `log.txt` | Diagnostic log |
 
 ---
 

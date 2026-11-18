@@ -11,7 +11,7 @@ SpikeInterface (get_neuropixels_sample_shifts) and IBL destriping:
     NP2.0: 16 channels per ADC, channel pairs -> group = (ch // 2) % 16  (16 x 24)
 
 The result is one int32 group id per sorted channel, in Kilosort chanMap order.
-That is the row order of the online sorter, which reads it from car_groups.npy.
+That is the row order of the live sorter, which reads it from car_groups.npy.
 """
 import numpy as np
 

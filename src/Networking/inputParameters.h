@@ -61,15 +61,10 @@ struct InputParameters {
 								iTimeBehind{ 0 },     // Allowed lag
 								iAvgWindowTime,
 								iRedundancy,
-								iWindowLength,
-								iBinLength,
-								iWindowOffset,
 								iSorterType,
 								iNumTemplates;
 
 	bool						bReadFromFile,
-								bIsDecoding,
-								bIsSendingFeedback,
 								bSmallskip{ false };  // when lag exceeds iTimeBehind: skip only to the lag limit
 	uint16_t					sdmPort{};
 

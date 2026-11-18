@@ -12,7 +12,7 @@ extern ImGuiID g_rasterDockNode;
 #include "CNPY/cnpy.h"          // ks_dshift.npy, for the drift-trace overlay
 #include "../Helpers/GuiHelpers.h"
 #include "../Networking/sorterParameters.h"
-#include "../Networking/onlineSpikesPayload.h"
+#include "../Networking/spikesPayload.h"
 #include "../Networking/NetworkHelpers.h"
 #include "../Helpers/RetrainSignal.h"   // g_retrainRequested (drift retrain feature)
 
@@ -36,7 +36,6 @@ OutputGuiTab::OutputGuiTab(std::string tabName, std::string ossInputDir, float r
 	m_fSampRate(0),
 	m_dChanpos(),
 	m_tCalcing(),
-	predictLabel(-1),
 	sock(Sock::UDP),
 	streamSampleCt(-1),
 	m_bNeurons(),
@@ -66,9 +65,8 @@ OutputGuiTab::~OutputGuiTab()
 }
 
 
-void OutputGuiTab::setupOutput(sockaddr_in mainAddr, long m_lMaxScanWind, long m_lSpikeRateWindow, bool isDecoding)
+void OutputGuiTab::setupOutput(sockaddr_in mainAddr, long m_lMaxScanWind, long m_lSpikeRateWindow)
 {
-	this->isDecoding = isDecoding; 
 	// Connect to the Main Server
 	std::cout << tabName << ": Sending GUI connect message..." << std::endl;
 	sendConnectMsg(&sock, mainAddr, _GUI);
@@ -125,7 +123,7 @@ void OutputGuiTab::setupOutput(sockaddr_in mainAddr, long m_lMaxScanWind, long m
 }
 
 void OutputGuiTab::UpdateEvents() {
-	OnlineSpikesPayload payload;
+	SpikesPayload payload;
 
 	static int binsize = BIN_SIZE;
 
@@ -145,16 +143,13 @@ void OutputGuiTab::UpdateEvents() {
 		payload.Templates = vTemplates;
 		payload.Amplitudes = vAmplitudes;
 	#else
-		payload = recvPayload<OnlineSpikesPayload>(&fm);
+		payload = recvPayload<SpikesPayload>(&fm);
 	#endif
 
 		{
 			std::lock_guard<std::mutex> lk(trialMutex);
-			predictLabel = payload.predictLabel;
 			label = payload.label;
 			nTrials = payload.nTrials;
-			nCorrect = payload.nCorrect;
-			confidence = payload.confidence;
 		}
 
 		streamSampleCt = payload.streamSampleCt;
@@ -816,31 +811,10 @@ void OutputGuiTab::displayTrialInfo(const ImVec2 windowCenter, bool &showTrialIn
 
 	ImGui::SetNextWindowClass(&plotWindowClass);
 	ImGui::Begin("Trial Info", &showTrialInfo);
-	if (!isDecoding) {
-		std::string txt = "# Trials: " + std::to_string(nTrials);
-		ImGui::Text(txt.c_str());
-		txt = "Label: " + std::to_string(label);
-		ImGui::Text(txt.c_str());
-	}
-	else {
-		std::string txt = "# Trials: " + std::to_string(nTrials) + ", # Correct: " + std::to_string(nCorrect);
-		ImGui::Text(txt.c_str());
-		txt = "Accuracy: " + std::to_string((float)nCorrect / (float)nTrials);
-		ImGui::Text(txt.c_str());
-		txt = "Label: " + std::to_string(label) + " ";
-		ImGui::Text(txt.c_str()); ImGui::SameLine();
-		if (predictLabel != -1) {
-			txt = "Predicted: " + std::to_string(predictLabel) + " ";
-			ImGui::Text(txt.c_str()); ImGui::SameLine();
-			if (predictLabel == label)
-				ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.2f, 0.8f), "Correct!");
-			else
-				ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Incorrect!");
-			double conf = round(confidence * 10000) / 100;
-			txt = "The model had " + std::to_string(conf).substr(0, 5) + "%% confidence.";
-			ImGui::Text(txt.c_str());
-		}
-	}
+	std::string txt = "# Trials: " + std::to_string(nTrials);
+	ImGui::Text(txt.c_str());
+	txt = "Label: " + std::to_string(label);
+	ImGui::Text(txt.c_str());
 	ImGui::End();
 }
 

@@ -1,7 +1,6 @@
 ﻿#include <experimental/filesystem>
 
-#include "SpikeSorter/OnlineSpikes.h"
-#include "SpikeSorter/OnlineSpikesV2.h"
+#include "SpikeSorter/LiveSorter.h"
 #include "SpikeSorter/ThresholdCrossing.h"
 #include "Decoder/Decoder.h"
 #include "Gui/Gui.h"
@@ -20,6 +19,16 @@ std::atomic<bool> g_retrainRequested{ false };
 #include <algorithm>
 #include <map>
 #include <sstream>
+
+// LSS_VERSION comes from the VERSION file via LiveSpikeSorter.vcxproj.
+#ifndef LSS_VERSION
+#define LSS_VERSION dev
+#endif
+#define LSS_STR2(x) #x
+#define LSS_STR(x) LSS_STR2(x)
+// run_lss.py reads this marker straight from the .exe bytes to check that the
+// exe matches the launcher, without starting it (the exe asks for elevation).
+static const char kVersionMarker[] = "LSS_VERSION=" LSS_STR(LSS_VERSION);
 
 //Check if we are not in the .exe folder. A bit ugly, but it works
 void exeFolderSetup() {
@@ -41,7 +50,7 @@ void exeFolderSetup() {
 
 void runOSSParallel(sockaddr_in mainAddr, InputParameters params, DataSocket* sharedSocket) {
 	try {
-		OnlineSpikesV2 oSpikeSorter(params, mainAddr, sharedSocket);
+		LiveSorter oSpikeSorter(params, mainAddr, sharedSocket);
 		oSpikeSorter.runSpikeSorting();
 	}
 	catch (const std::exception& e) {
@@ -401,6 +410,11 @@ InputParameters parseCmdArgs(int argc, char* argv[]) {
 //
 // ------------------------------------------------------------------------------
 int main(int argc, char* argv[]) {
+	if (argc > 1 && std::string(argv[1]) == "--version") {
+		std::cout << (kVersionMarker + sizeof("LSS_VERSION=") - 1) << std::endl;
+		return 0;
+	}
+
 	exeFolderSetup(); // TODO check if this is necessary
 
 	// Parse command line arguments and then autopopulate the input GUI with them
@@ -476,7 +490,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	// Start up GUI
-	gui.plotOutputs(mainAddr, params.iMaxScanWindow, params.iAvgWindowTime, params.bIsDecoding);
+	gui.plotOutputs(mainAddr, params.iMaxScanWindow, params.iAvgWindowTime);
 
 	// Wait for all sorter thread to finish
 	bool finishedMsg;

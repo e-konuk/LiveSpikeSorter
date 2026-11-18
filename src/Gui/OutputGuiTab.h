@@ -94,11 +94,10 @@ public:
 	~OutputGuiTab();
 
 	//functions
-	void setupOutput(sockaddr_in mainAddr, long m_lMaxScanWind, long m_lSpikeRateWindow, bool isDecoding);
+	void setupOutput(sockaddr_in mainAddr, long m_lMaxScanWind, long m_lSpikeRateWindow);
 	void Render(const ImVec2 windowCenter);
 
 	//Sorter Settings
-	bool isDecoding;
 	long m_lT;
 	long m_lM;
 	long m_lN;
@@ -162,12 +161,9 @@ private:
 	std::mutex vrmsMutex;
 	std::mutex p2pMutex;
 
-	// Prediction variables
-	int16_t predictLabel;
+	// Trial info
 	int16_t label;
 	int16_t nTrials;
-	int16_t nCorrect;
-	double confidence;
 
 	// Object to prevent docking bugs
 	ImGuiWindowClass plotWindowClass;

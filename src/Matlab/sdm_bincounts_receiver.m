@@ -1,13 +1,13 @@
 % sdm_bincounts_receiver.m — TCP receiver for BinCounts SDM packets
-% Start this BEFORE launching OnlineSpikes.exe
+% Start this BEFORE launching LiveSpikeSorter.exe
 %
-% Usage: set ip/port, then run. OnlineSpikes connects to this server.
+% Usage: set ip/port, then run. LiveSpikeSorter connects to this server.
 
 ip   = "0.0.0.0";   % listen on all interfaces
 port = 9999;         % match your --sdm_port value
 
 server = tcpserver(ip, port, "Timeout", 60);
-fprintf("Waiting for OnlineSpikes to connect on port %d...\n", port);
+fprintf("Waiting for LiveSpikeSorter to connect on port %d...\n", port);
 
 % Wait for connection
 while ~server.Connected

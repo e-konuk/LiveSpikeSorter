@@ -7,7 +7,7 @@
 #include "ThresholdCrossing.h"
 #include "mockStreamDataSocket.h"
 
-#include "../Networking/onlineSpikesPayload.h"
+#include "../Networking/spikesPayload.h"
 #include "../Networking/NetworkHelpers.h"
 #include "../Networking/FragmentManager.h"
 
@@ -73,7 +73,7 @@ ThresholdCrossing::ThresholdCrossing(InputParameters Params, sockaddr_in mainAdd
 	std::thread imecRetransThread = imecFm.retransmitterThread();
 	imecRetransThread.detach();
 
-	// Send SorterParams to Decoder // TODO Evaluate if extracting sorterParams from OnlineSpikes.cu is necessary
+	// Send SorterParams to Decoder // TODO Evaluate if extracting sorterParams from LiveSorter.cu is necessary
 	SorterParameters sorterParams = GetSorterParams();
 	sendPayload(&imecFm, sorterParams, m_decoderImecAddr);
 
@@ -92,7 +92,7 @@ ThresholdCrossing::ThresholdCrossing(InputParameters Params, sockaddr_in mainAdd
 
 // ------------------------------------------------------------------------------
 //
-// Name			: OnlineSpikes::~OnlineSpikes()
+// Name			: ThresholdCrossing::~ThresholdCrossing()
 //
 // Description  : Destructor for freeing pointers
 //
@@ -112,7 +112,7 @@ ThresholdCrossing::~ThresholdCrossing()
 void ThresholdCrossing::runThresholdCrossing() {
 	std::cout << "Starting threshold crossing..." << std::endl;
 
-	static const char *ptLabel = { "OnlineSpikes::runThresholdCrossing" };
+	static const char *ptLabel = { "ThresholdCrossing::runThresholdCrossing" };
 	OSSSpecificParams osParams = {
 		m_lC,
 		m_vChannelMap,
@@ -235,7 +235,7 @@ void ThresholdCrossing::runThresholdCrossing() {
 
 		clock_gettime(tBatchAfter);
 		long processTime = GetTimeDiff(tBatchAfter, tBatchBefore);
-		OnlineSpikesPayload payload = { 0,
+		SpikesPayload payload = { 0,
 										lLatestCt,
 										vTimes,
 										vTemplates,
@@ -257,7 +257,7 @@ void ThresholdCrossing::runThresholdCrossing() {
 
 // ------------------------------------------------------------------------------
 //
-// Name			: OnlineSpikes::MoveFifo
+// Name			: ThresholdCrossing::MoveFifo
 //
 // Description  : Move data from the back to the front (will be used asynchronysly most of the time)
 //
@@ -271,7 +271,7 @@ void ThresholdCrossing::MoveFifo() {
 
 // ------------------------------------------------------------------------------
 //
-// Name			: OnlineSpikes::Get functions
+// Name			: ThresholdCrossing::Get functions
 //
 // Description  : Get functions which are mainly needed by the GUI
 //

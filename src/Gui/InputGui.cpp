@@ -122,13 +122,6 @@ InputGUI::InputGUI(InputParameters cmdLineParams)
 
 	Params.bSmallskip = cmdLineParams.bSmallskip;
 	Params.bReadFromFile = false;
-	Params.bIsDecoding = false;
-	Params.bIsSendingFeedback = false;
-
-	/* Decoder window/bin */
-	Params.iWindowLength = 3000;
-	Params.iBinLength = 30;
-	Params.iWindowOffset = 4500;
 }
 
 
@@ -137,10 +130,10 @@ InputGUI::~InputGUI() {
 
 
 //A function to calculate the amount of memory that is used. THIS IS DEPRECATED AND IS NO LONGER ACCURATE.
-// TODO: Do the math for this for OnlineSpikesV2.cu, nearly all memory allocated for it should be found in OnlineSpikesV2MemoryList.h.
-// If someone actually wants to go and make this super extensible, I recommend using the X-macro defined in OnlineSpikesV2MemoryList.h
+// TODO: Do the math for this for LiveSorter.cu, nearly all memory allocated for it should be found in LiveSorterMemoryList.h.
+// If someone actually wants to go and make this super extensible, I recommend using the X-macro defined in LiveSorterMemoryList.h
 // to have an automatic memory calculator --- the calculation code will automatically update to reflect the addition or removal of memory
-// fields added to OnlineSpikesV2MemoryList.h. Look at OnlineSpikesV2::allocateMemory() to get an idea on how one would do this
+// fields added to LiveSorterMemoryList.h. Look at LiveSorter::allocateMemory() to get an idea on how one would do this
 double InputGUI::CalcBytes(long L, long C, long M, long MaxWin, long MinWin, long SpikesExpected) {
 	double Bytes = 0;
 	unsigned long long N = MaxWin + MinWin;
@@ -304,7 +297,7 @@ void InputGUI::gatherSpikeSorterParameters() {
 	ImGui::InputInt("##Redundancy", &Params.iRedundancy, 1, 5);
 
 	ImGui::Text("Time allowed to be behind");
-	ImGui::SameLine(); HelpMarker("The time (in ms) the onlinesorter is allowed to run behind. Normally the program, when it has a long batch, skips the next one. If this is set to a non-zero value the program instead of skipping a batch tries to keep up. Some batches are easier than others so there is a chance that it gets back to online. If it does get longer than the value specified it will start skipping batches. When a value of  > 100'000 gets specified it will always try to keep up and not skip any values.");
+	ImGui::SameLine(); HelpMarker("The time (in ms) the live sorter is allowed to run behind. Normally the program, when it has a long batch, skips the next one. If this is set to a non-zero value the program instead of skipping a batch tries to keep up. Some batches are easier than others so there is a chance that it gets back to online. If it does get longer than the value specified it will start skipping batches. When a value of  > 100'000 gets specified it will always try to keep up and not skip any values.");
 	ImGui::InputInt("##TimeBehind", &Params.iTimeBehind, 100, 500);
 
 	ImGui::Text("Spike Rate Average Time");
@@ -412,45 +405,6 @@ void InputGUI::gatherDecoderParameters() {
 	ImGui::Text("Log file:");
 	ImGui::InputText("##LogFile", &Params.logFile);
 	*/
-	ImGui::Checkbox("Use real-time decoding.", &Params.bIsDecoding);
-	ImGui::SameLine(); HelpMarker("To use the decoder, first run the spikesorter for 10-20 minutes with this unchecked to produce a file called spike_output.txt. Then, run the spikesorter again with this box checked. The decoder will use spike_output as training data to train a real time classifier.");
-	if (Params.bIsDecoding) {
-		ImGui::Text("Directory:");
-		ImGui::SameLine(); HelpMarker("Set the base directory. This will auto-populate the training data file, output folder, and event file paths.");
-		InputTextWithFileDialog("##Directory", &Params.sDecoderInputFolder, "Select##DirectoryButton", Params.sDecoderWorkFolder.c_str(), NULL, NULL, NULL, true);
-
-		if (!Params.sDecoderInputFolder.empty()) {
-			Params.sSpikesFile = Params.sDecoderInputFolder + "/spikeOutput.txt";
-			Params.sDecoderWorkFolder = Params.sDecoderInputFolder + "/";
-			Params.sEventFile = Params.sDecoderInputFolder + "/eventfile.txt";
-		}
-
-		ImGui::Text("Decoder training data file:");
-		ImGui::SameLine(); HelpMarker("Choose a Spike Sorter output data file to use as decoder training data.");
-		InputTextWithFileDialog("##dataFile", &Params.sSpikesFile, "Select##datafileButton", Params.sDecoderWorkFolder.c_str(), 1, txtFilterPattern, 0);
-
-		ImGui::Text("Decoder output folder:");
-		ImGui::SameLine(); HelpMarker("Folder where the Decoder will write output files (and temporary files).");
-		InputTextWithFileDialog("##workFolder", &Params.sDecoderWorkFolder, "Select##workFolderButton", Params.sDecoderWorkFolder.c_str(), NULL, NULL, NULL, true);
-
-		ImGui::Text("Stimulus Display training event file:");
-		InputTextWithFileDialog("##EventFile", &Params.sEventFile, "Select##eventFileButton", _FILE_PATH, 1, txtFilterPattern, 0);
-
-		ImGui::Text("Decoder window length:");
-		ImGui::SameLine(); HelpMarker("The decoder window length determines how much time the decoder trains and predicts on. (9000 streamSampleCounts / 30000 samples per second = 300 ms)");
-		ImGui::InputInt("##DecodeWindowLength", &Params.iWindowLength);
-
-		ImGui::Text("Decoder bin length:");
-		ImGui::SameLine(); HelpMarker("Every binLength stream sample counts, the windowLength long window shifts by binLength stream sample counts. (1500 streamSampleCounts / 30000 samples per second = 50 ms)");
-		ImGui::InputInt("##DecodeBinLength", &Params.iBinLength);
-
-		ImGui::Text("Decoder training window offset:");
-		ImGui::SameLine(); HelpMarker("The decoder training window offset determines the number of samples offset from the event time to train on. The effective window becomes [eventTime + offset - windowLength, eventTime + offset]  (4500 streamSampleCounts / 30000 samples per second = 150 ms)");
-		ImGui::InputInt("##DecodeWindowOffset", &Params.iWindowOffset);
-
-		ImGui::Checkbox("Send feedback", &Params.bIsSendingFeedback);
-	}
-
 	if (ImGui::CollapsingHeader("SDM Processor")) {
 		ImGui::Text("SDM Processor Type:");
 		ImGui::SameLine(); HelpMarker("How spikes become packets for the stimulus display machine. Settings for each processor are normally set in the Python launcher (src/Python/sdm_processors.py).");

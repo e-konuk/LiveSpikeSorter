@@ -35,10 +35,9 @@ cd LiveSpikeSorter
 Then create your environment and install dependencies:
 ```bash
 conda env create -f environment.yml
-conda activate lss
 ```
 
-This installs Python, PyTorch (CUDA 11.8 build), Kilosort 4.0.13, and the CUDA 11.8 / cuDNN 8.9.7 libraries LSS runs on.
+This installs Python, PyTorch (CUDA 11.8 build), Kilosort 4.0.13, and the CUDA 11.8 / cuDNN 8.9.7 libraries LSS runs on into conda env `lss`
 
 Update an existing environment with:
 
@@ -50,8 +49,9 @@ Download [`LiveSpikeSorter-win64.zip`](https://github.com/e-konuk/LiveSpikeSorte
 
 ## Running LSS 
 
-From the `lss` environment, in any directory:
+For dependencies in the `lss` environment, in any directory:
 ```bash
+conda activate lss
 lss
 ```
 

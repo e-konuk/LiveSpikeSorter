@@ -991,10 +991,11 @@ void Neuron::plotFR(float sampRate, int binSize) {
 
 	// 8) Plot with fixed X limits
 	ImPlot::SetNextAxisLimits(ImAxis_X1, -float(history_s), 0.0f, ImPlotCond_Always);
-	ImPlot::BeginPlot("Firing Rate (sliding)", ImVec2(-1, 0));
-	ImPlot::SetupAxes("Time (s)", "Rate (Hz)");
-	ImPlot::PlotLine("FR", x.data(), y.data(), int(ptsToShow));
-	ImPlot::EndPlot();
+	if (ImPlot::BeginPlot("Firing Rate (sliding)", ImVec2(-1, 0))) {
+		ImPlot::SetupAxes("Time (s)", "Rate (Hz)");
+		ImPlot::PlotLine("FR", x.data(), y.data(), int(ptsToShow));
+		ImPlot::EndPlot();
+	}
 }
 
 
@@ -1009,9 +1010,10 @@ void Neuron::plotAutoCorr()
 	//Calculate how much to show
 	size_t ToShow = (history > autocorr.size()) ? autocorr.size() : history;
 
-	ImPlot::BeginPlot("Autocorrelation", ImVec2(-1, 0));
-	ImPlot::PlotLine("Autocorrelation", autocorr.data() + autocorr.size() - ToShow, ToShow);
-	ImPlot::EndPlot();
+	if (ImPlot::BeginPlot("Autocorrelation", ImVec2(-1, 0))) {
+		ImPlot::PlotLine("Autocorrelation", autocorr.data() + autocorr.size() - ToShow, ToShow);
+		ImPlot::EndPlot();
+	}
 }
 
 // calculate the Neurons within a specific range (default is 10 channels)
@@ -1060,9 +1062,10 @@ void Neuron::plotCrossCorr(int History, OutputGuiTab* outputGUI)
 			//go to end of data and decrement
 			plotArray += crosscorr[j].size() - toshow;
 
-			ImPlot::BeginPlot(std::string("Cross Correlation with Neuron ").append(num).c_str(), ImVec2(-1, 0));
-			ImPlot::PlotLine("Cross Correlation", plotArray, toshow);
-			ImPlot::EndPlot();
+			if (ImPlot::BeginPlot(std::string("Cross Correlation with Neuron ").append(num).c_str(), ImVec2(-1, 0))) {
+				ImPlot::PlotLine("Cross Correlation", plotArray, toshow);
+				ImPlot::EndPlot();
+			}
 		}
 
 	}
@@ -1088,9 +1091,10 @@ void Neuron::plotCrossCorr(int History, std::vector<std::vector<float> >& crossc
 			//go to end of data and decrement
 			plotArray += crosscorr[j].size() - toshow;
 
-			ImPlot::BeginPlot(std::string("Cross Correlation with Neuron ").append(num).c_str());
-			ImPlot::PlotLine("Cross Correlation", plotArray, toshow);
-			ImPlot::EndPlot();
+			if (ImPlot::BeginPlot(std::string("Cross Correlation with Neuron ").append(num).c_str())) {
+				ImPlot::PlotLine("Cross Correlation", plotArray, toshow);
+				ImPlot::EndPlot();
+			}
 		}
 	}
 }
@@ -1109,10 +1113,11 @@ void Neuron::plotAmplitude() {
 	//Calculate how much to show
 	size_t ToShow = min(history, amplitudes.size());
 
-	ImPlot::BeginPlot("Amplitude Plot", ImVec2(-1, 0));
-	ImPlot::SetupAxes("Spike occurrences", "Amplitude", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-	ImPlot::PlotLine("Measured Amplitudes", amplitudes.data() + amplitudes.size() - ToShow, ToShow);
-	ImPlot::EndPlot();
+	if (ImPlot::BeginPlot("Amplitude Plot", ImVec2(-1, 0))) {
+		ImPlot::SetupAxes("Spike occurrences", "Amplitude", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+		ImPlot::PlotLine("Measured Amplitudes", amplitudes.data() + amplitudes.size() - ToShow, ToShow);
+		ImPlot::EndPlot();
+	}
 }
 
 void Neuron::plotISI() {
@@ -1136,11 +1141,12 @@ void Neuron::plotISI() {
 	ImGui::SameLine();
 	setRange(range, 20, 500);
 
-	ImPlot::BeginPlot("ISI", ImVec2(-1, 0));
-	ImPlot::SetupAxes("Inter-Spike Interval (ms)", "Density", ImPlotAxisFlags_AutoFit);
-	ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
-	ImPlot::PlotHistogram("ISI", ISIs.data(), SampsToShow, bins, false, true, ImPlotRange(0, range));
-	ImPlot::EndPlot();
+	if (ImPlot::BeginPlot("ISI", ImVec2(-1, 0))) {
+		ImPlot::SetupAxes("Inter-Spike Interval (ms)", "Density", ImPlotAxisFlags_AutoFit);
+		ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
+		ImPlot::PlotHistogram("ISI", ISIs.data(), SampsToShow, bins, false, true, ImPlotRange(0, range));
+		ImPlot::EndPlot();
+	}
 }
 
 void Neuron::plotPSTH(std::vector<long> eventTimes, std::vector<int16_t> eventLabels, float sampRate, int bins, int binSize, int binSizeCts, int rangeCts, int negRange, int negRangeCts, int16_t label) { // TODO change function so PST only calculated when new event is added
@@ -1198,15 +1204,16 @@ void Neuron::plotPSTH(std::vector<long> eventTimes, std::vector<int16_t> eventLa
 
 	std::string plotTitle = (label == -1) ? "PSTH across all events" : "PSTH for label " + std::to_string(label);
 
-	ImPlot::BeginPlot(plotTitle.c_str(), ImVec2(-1, 0));
-	if (label == -1 || label == 0) // Currently all plots fit to the y axis of psth of label 0, but should be to whichever is max
-		ImPlot::SetupAxes("Peristimulus time (ms)", "Firing Rate", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-	else
-		ImPlot::SetupAxis(ImAxis_X1, "Peristimulus time (ms)", ImPlotAxisFlags_AutoFit);
+	if (ImPlot::BeginPlot(plotTitle.c_str(), ImVec2(-1, 0))) {
+		if (label == -1 || label == 0) // Currently all plots fit to the y axis of psth of label 0, but should be to whichever is max
+			ImPlot::SetupAxes("Peristimulus time (ms)", "Firing Rate", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+		else
+			ImPlot::SetupAxis(ImAxis_X1, "Peristimulus time (ms)", ImPlotAxisFlags_AutoFit);
 
-	ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
-	ImPlot::PlotBars("PSTH", x.data(), PSTs.data(), bins, binSize);
-	ImPlot::EndPlot();
+		ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
+		ImPlot::PlotBars("PSTH", x.data(), PSTs.data(), bins, binSize);
+		ImPlot::EndPlot();
+	}
 }
 
 void Neuron::plotPSTHs(std::vector<long> eventTimes, std::vector<int16_t> eventLabels, float sampRate) {

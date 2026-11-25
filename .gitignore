@@ -288,15 +288,15 @@ methods_section_draft.txt
 
 
 # LiveSpikeSorter.exe: bin/prebuilt (downloaded release) and bin/build (source build).
-# Only the README.txt placeholders are tracked, so the folders exist after cloning.
+# Only the .gitkeep placeholders are tracked, so the folders exist after cloning.
 !/bin/
 /bin/*
 !/bin/prebuilt/
 !/bin/build/
 /bin/prebuilt/*
 /bin/build/*
-!/bin/prebuilt/README.txt
-!/bin/build/README.txt
+!/bin/prebuilt/.gitkeep
+!/bin/build/.gitkeep
 
 # Created by `pip install -e .`
 *.egg-info/

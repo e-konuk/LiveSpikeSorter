@@ -18,6 +18,7 @@ std::atomic<bool> g_retrainRequested{ false };
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <sstream>
 
 // LSS_VERSION comes from the VERSION file via LiveSpikeSorter.vcxproj.
@@ -48,10 +49,26 @@ void exeFolderSetup() {
 	}
 }
 
+// Check if LSS fails on start
+[[noreturn]] static void exitOnSorterStartFailure(const std::string& why) {
+	const std::string msg = "The sorter could not start:\n\n" + why;
+	std::cerr << msg << std::endl;
+	MessageBoxA(NULL, msg.c_str(), "Live Spike Sorter", MB_OK | MB_ICONERROR);
+	std::exit(1);
+}
+
 void runOSSParallel(sockaddr_in mainAddr, InputParameters params, DataSocket* sharedSocket) {
+	std::unique_ptr<LiveSorter> oSpikeSorter;
 	try {
-		LiveSorter oSpikeSorter(params, mainAddr, sharedSocket);
-		oSpikeSorter.runSpikeSorting();
+		oSpikeSorter = std::make_unique<LiveSorter>(params, mainAddr, sharedSocket);
+	}
+	catch (const std::exception& e) {
+		exitOnSorterStartFailure(std::string("GPU ") + std::to_string(params.uSelectedDevice) + ", " +
+			params.sInputFolder + "\n" + e.what());
+	}
+
+	try {
+		oSpikeSorter->runSpikeSorting();
 	}
 	catch (const std::exception& e) {
 		std::cerr << "Exception caught: " << e.what() << std::endl;
@@ -66,7 +83,7 @@ void runSorter(sockaddr_in mainAddr, InputParameters params, DataSocket** &mNC) 
 		cudaGetDeviceCount(&nGPUsDetected);
 		
 		if (nGPUsDetected == 0) {
-			throw std::runtime_error("No GPUs detected, cannot run Live Spike Sorter\n");
+			exitOnSorterStartFailure("No NVIDIA GPU detected.");
 		}
 
 		if (params.vSelectedDevices.size() == 0) {
@@ -74,15 +91,23 @@ void runSorter(sockaddr_in mainAddr, InputParameters params, DataSocket** &mNC) 
 			params.vSelectedDevices.push_back(0);
 		}
 
-		DataSocket* sharedSocket = new StreamDataSocket(params.sDataAccquisitionHost, 
-			params.uDataAccquisitionPort, 
-			params.iSubstream, 
-			params.iMaxScanWindow, 
-			params.iMinScanWindow, 
-			params.fImecSamplingRate, 
-			params.fNidqSamplingRate, 
-			params.iDownsampling
-		);
+		DataSocket* sharedSocket = nullptr;
+		try {
+			sharedSocket = new StreamDataSocket(params.sDataAccquisitionHost,
+				params.uDataAccquisitionPort,
+				params.iSubstream,
+				params.iMaxScanWindow,
+				params.iMinScanWindow,
+				params.fImecSamplingRate,
+				params.fNidqSamplingRate,
+				params.iDownsampling
+			);
+		}
+		catch (const std::exception& e) {
+			exitOnSorterStartFailure("Could not connect to SpikeGLX at " + params.sDataAccquisitionHost + ":" +
+				std::to_string(params.uDataAccquisitionPort) +
+				".\nIs SpikeGLX running, with its Command Server enabled on this address and port?\n\n" + e.what());
+		}
 
 		// starts spikeglx
 		sharedSocket->startRun();

@@ -12,6 +12,7 @@ Live Spike Sorter (LSS) is a GPU-accelerated real-time spike sorter for extracel
 
 | Requirement | Version / Notes |
 | :---- | :---- |
+| **Operating system** | Windows 10 or 11, 64-bit |
 | **NVIDIA GPU** | Compute capability 7.5 (Turing) through 8.9 (Ada). |
 | **NVIDIA driver** | 522.06 or newer |
 | **Python** | 3.10 – 3.12 (installed by conda) |
@@ -19,8 +20,8 @@ Live Spike Sorter (LSS) is a GPU-accelerated real-time spike sorter for extracel
 | **cuDNN** | 8.9.7 (installed by conda) |
 | **Kilosort4** | 4.0.13 from PyPI (installed by conda)|
 | **SpikeGLX** | Latest release |
-| **CPU** | Your processor should not be a bottleneck so long as your device [can run Kilosort](https://kilosort.readthedocs.io/en/latest/hardware.html). <br> If SpikeGLX aquistion is also on the same machine, we refer to their [hardware requirements](https://github.com/billkarsh/SpikeGLX/blob/master/Markdown/SystemRequirements_PXI.md)
-| **RAM** | Same as above
+| **CPU** | Your processor should not be a bottleneck so long as your device [can run Kilosort](https://kilosort.readthedocs.io/en/latest/hardware.html). <br> If SpikeGLX acquisition is also on the same machine, we refer to their [hardware requirements](https://github.com/billkarsh/SpikeGLX/blob/master/Markdown/SystemRequirements_PXI.md) |
+| **RAM** | Same as above |
 
 ## Python Setup
 

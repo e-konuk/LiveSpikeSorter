@@ -66,11 +66,13 @@ bool StreamDataSocket::connect() {
 	{
 		std::unique_lock<std::mutex> lock(m_mSGlxMutex);
 		if (!sglx_connect_std(S, m_sHost, m_uPort)) {
-		error:
 			printf("error [%s]\n", S.err.c_str());
+			std::cout << "Could not connect to SpikeGLX at " << getHost() << ":" << getPort()
+				<< ". Is SpikeGLX running, with its Command Server enabled on this address and port?" << std::endl;
+			return false;
 		}
 	}
-			std::cout << "...Connection successful!" << std::endl;
+	std::cout << "...Connection successful!" << std::endl;
 	//m_mSGlxMutex.unlock();
 	return true;
 }

@@ -32,8 +32,7 @@ spin = tk.Spinbox(root, from_=1, to=16, textvariable=num_sorters_var, width=5, c
 tk.Label(root, text="Number of sorters:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
 spin.grid(row=0, column=1, padx=5, pady=5, sticky="w")
 
-# Global Data Acquisition parameters (shared across all sorters: one SpikeGLX
-# stream connection for the whole process)
+# Global Data Acquisition parameters (SpikeGLX Stream)
 sglx_host_var = tk.StringVar(value="127.0.0.1")
 sglx_port_var = tk.StringVar(value="4142")
 
@@ -156,8 +155,9 @@ HINTS = {
     "MAX_TEMPLATES": ("Limit how many preclustered templates the sorter uses "
                       "(0 = use all). Fewer templates = less GPU work in "
                       "matchingPursuit = better real-time performance on low-spec "
-                      "GPUs, at some loss of detection. Applied to oss_input every "
-                      "launch."),
+                      "GPUs, at some loss of detection. Applied when oss_input is "
+                      "rebuilt, i.e. when Rerun Kilosort4 is ticked; a reused "
+                      "oss_input keeps the filter it was built with."),
     "CMR": ("Common median reference grouping. Global = one median across all "
             "channels (Kilosort default). The ADC presets take the median over "
             "channels the probe samples at the same instant (NP1.0: 12 groups of 32, "
@@ -171,7 +171,9 @@ HINTS = {
                       "channels). Use this to focus the sorter on one region of "
                       "cortical space. Composes with Max templates: the channel "
                       "range narrows the field first, then Max templates keeps the "
-                      "most active survivors. Applied to oss_input every launch."),
+                      "most active survivors. Applied when oss_input is rebuilt, "
+                      "i.e. when Rerun Kilosort4 is ticked; a reused oss_input "
+                      "keeps the filter it was built with."),
     "SGLX_HOST": ("The IP address of the machine running SpikeGLX. If SpikeGLX is "
                   "running on this same machine, leave as 127.0.0.1. Shared by all "
                   "sorters (they use one SpikeGLX connection)."),
@@ -211,10 +213,11 @@ HINTS = {
                      "(Python, MATLAB, Bonsai, ...) so closed-loop logic can run "
                      "outside LSS without writing C++. host:port of the receiver; "
                      "127.0.0.1:9100 = a script on this machine. Fire-and-forget: "
-                     "a missing receiver is harmless. Receiver + packet format: "
-                     "src/Python/lss_stream.py. Shared by all sorters (packets "
-                     "carry a sorter id and imec probe number); "
-                     "src/Python/multi_probe_receiver.py combines probes."),
+                     "a missing receiver is harmless. Example receiver: "
+                     "src/Python/lss_receiver.py; packet format: "
+                     "src/Networking/SpikeStream.h. Shared by all sorters (packets "
+                     "carry a sorter id and imec probe number, so one receiver "
+                     "can combine probes)."),
     "PROBE": ("Which imec probe this sorter reads from SpikeGLX: N = imecN "
               "(the number in the probe's .imecN.ap.bin file name)."
               "Every sorter needs its own GPU. Each sorter must use "
@@ -662,15 +665,82 @@ def create_finish_widgets():
     error_text.grid(row=4, column=0, columnspan=4, padx=5, pady=5)
     error_text.configure(state="disabled")
 
+# Can only be set to True if the user clicks Finish
+launch_confirmed = False
+
 # Destroy GUI on finish
 def finish_and_quit():
+    global launch_confirmed
     lag = max_lag_var.get().strip() or "0"
     if not lag.isdigit():
         messagebox.showerror("Invalid setting", f"Max lag must be a whole number of ms >= 0 (got '{lag}').")
         return
+    errors = input_errors()
+    if errors:
+        messagebox.showerror("Check settings", "\n".join(errors))
+        return
     if not check_probes():
         return
+    launch_confirmed = True
     root.destroy()
+
+def input_errors():
+    """Settings that would otherwise fail later, some only after Kilosort4 has run.
+    Returns a list of messages; empty = OK to launch."""
+    errors = []
+    for i in range(num_sorters_var.get()):
+        who = f"Sorter {i+1}: "
+        base = base_path_vars[i].get().strip()
+        ks_out = ks_output_dir_vars[i].get().strip()
+        if not base:
+            errors.append(who + "BASE_PATH is empty.")
+
+        if rerun_ks_vars[i].get():
+            if not ks_out:
+                errors.append(who + "Kilosort Output Directory is empty.")
+            elif not Path(ks_out).resolve().parent.is_dir():
+                errors.append(who + f"the folder that should contain the Kilosort Output Directory "
+                                    f"does not exist ({Path(ks_out).resolve().parent}).")
+            for label, var in (("Recording binary file", bin_file_vars[i]),
+                               ("Recording metadata file", meta_file_vars[i])):
+                path = var.get().strip()
+                if not path or not Path(path).is_file():
+                    errors.append(who + f"{label} not found ('{path}').")
+            # A bare file name is looked up in Kilosort's own probe folder, so only
+            # a full path can be checked here.
+            chanmap = chanmap_file_vars[i].get().strip()
+            if not chanmap:
+                errors.append(who + "Channel map file is empty (Kilosort4 needs one).")
+            elif Path(chanmap).is_absolute() and not Path(chanmap).is_file():
+                errors.append(who + f"Channel map file not found ('{chanmap}').")
+        elif base and not (Path(base) / "oss_input" / "templates.npy").is_file() \
+                and not (ks_out and (Path(ks_out) / "templates.npy").is_file()):
+            errors.append(who + "no oss_input in BASE_PATH and no Kilosort output to build it "
+                                "from. Tick Rerun Kilosort4.")
+
+        if template_toggle_vars[i].get():
+            cap = max_templates_vars[i].get().strip()
+            if cap and not cap.isdigit():
+                errors.append(who + f"Max templates must be a whole number >= 0 (got '{cap}').")
+            try:
+                parse_channel_range(channel_range_vars[i].get())
+            except ValueError:
+                errors.append(who + f"Channel range must look like 100-150 "
+                                    f"(got '{channel_range_vars[i].get().strip()}').")
+
+        if sdm_vars[i].get():
+            if not sdm_ip_vars[i].get().strip():
+                errors.append(who + "SDM IP Address is empty.")
+            if not sdm_port_vars[i].get().strip().isdigit():
+                errors.append(who + f"SDM Port Number must be a whole number "
+                                    f"(got '{sdm_port_vars[i].get().strip()}').")
+
+    if spike_stream_enabled_var.get():
+        host, _, port = spike_stream_addr_var.get().strip().rpartition(":")
+        if not host or not port.isdigit():
+            errors.append(f"Spike Stream address must look like host:port "
+                          f"(got '{spike_stream_addr_var.get().strip()}').")
+    return errors
 
 def check_probes():
     """Per-sorter probe sanity checks before launch. False = stay in the GUI."""
@@ -833,6 +903,9 @@ def lss_exe_env():
 # Entry point for full run
 def run_lss_multi():
     main()
+    if not launch_confirmed:
+        print("Launcher closed without pressing Finish; nothing was run.")
+        return
 
     # Gather inputs
     n = num_sorters_var.get()
@@ -999,6 +1072,8 @@ def run_lss_multi():
         print("Running LSS with:", shlex.join(cmd))
         proc = subprocess.Popen(cmd, shell=True, env=lss_exe_env())
         rc = proc.wait()
+        if rc not in (0, 42):   # 42 = retrain requested
+            print(f"{EXE_NAME} exited with code {rc}; see the messages above.")
 
         retrain_sources = {}   # sorter index -> (bin_path, meta_path)
         for i, oss in enumerate(OSS_DIRS):
@@ -1317,6 +1392,28 @@ def snapshot_drift_stage(ops, st0, device=None):
     }
 
 
+def reused_template_filter_note(oss_in, filter_requested):
+    """Template filtering only runs when oss_input is rebuilt. For a reused oss_input,
+    say what it was built with whenever that could differ from the launcher's
+    Template filtering settings ('' if there is nothing to say)."""
+    built = None
+    try:
+        built = json.loads((Path(oss_in) / 'subset_manifest.json').read_text())
+    except (OSError, ValueError):
+        pass
+    if built is None:
+        return ("Template filtering settings were not applied: this oss_input was built "
+                "unfiltered and is reused as is. Tick Rerun Kilosort4 to rebuild it with "
+                "the filter.") if filter_requested else ""
+    desc = f"{built.get('new_unclu_T')} of {built.get('original_unclu_T')} templates"
+    chan = (built.get('channel_filter') or {}).get('channel_range')
+    if chan:
+        desc += f", probe channels {chan[0]}-{chan[1]}"
+    return (f"this oss_input was built with template filtering ({desc}) and is reused as "
+            f"is. Changes to the Template filtering settings since then take effect only "
+            f"after Rerun Kilosort4.")
+
+
 def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
                          META_FILES, CHANMAP_FILES, RERUN_FLAGS,
                          MAX_TEMPLATES=None, CHANNEL_RANGES=None,
@@ -1330,6 +1427,11 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
         if not RERUN_FLAGS[i] and (oss_in / 'templates.npy').exists():
             print(f"Reusing existing oss_input for sorter {i+1} "
                   "(Rerun Kilosort4 unchecked); skipping Kilosort4/torch-dependent steps.")
+            note = reused_template_filter_note(
+                oss_in, bool(MAX_TEMPLATES and MAX_TEMPLATES[i] not in ("", "0"))
+                        or bool(CHANNEL_RANGES and CHANNEL_RANGES[i]))
+            if note:
+                print(f"NOTE (sorter {i+1}): {note}")
             OSS_DIRS.append(str(oss_in) + '\\')
             continue
 
@@ -1499,6 +1601,8 @@ def curate_oss_input_dir(BASE_PATHS, KS_OUTPUT_DIRS, BIN_FILES,
         except (ValueError, TypeError):
             n_keep = 0
         chan_range = parse_channel_range(CHANNEL_RANGES[i]) if CHANNEL_RANGES else None
+        # oss_input was just rebuilt unfiltered; drop the record of any earlier filter.
+        (oss_in / 'subset_manifest.json').unlink(missing_ok=True)
         if n_keep > 0 or chan_range is not None:
             subset_oss_input_inplace(oss_in, n_keep, metric="spikes",
                                      allow_below_t=True, channel_range=chan_range)

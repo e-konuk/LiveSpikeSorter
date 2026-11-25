@@ -492,8 +492,7 @@ void LiveSorter::loadKilosortParameters(std::string directoryPath)
 {
 	std::ifstream inf(directoryPath + "misc.txt");
 	if (!inf.is_open()) {
-		std::cerr << "Unable to open file " << directoryPath << "/data.txt" << std::endl;
-		exit(EXIT_SUCCESS);
+		_RUN_ERROR("LiveSorter::loadKilosortParameters", "Unable to open " + directoryPath + "misc.txt");
 	}
 
 	std::map<std::string, std::string> params;
@@ -1023,15 +1022,7 @@ void LiveSorter::runSpikeSorting()
 
 		payload.MatchScores = matchScores;
 
-		// // ----------------------------------------------------------------
-		// // DIAGNOSTIC TEMP verification probe -- delete this once confirmed.
-		// if (!matchScores.empty()) {
-		// 	auto mm = std::minmax_element(matchScores.begin(), matchScores.end());
-		// 	std::cout << "[MatchScore] n=" << matchScores.size() << "/" << times.size()
-		// 	          << " min=" << *mm.first << " max=" << *mm.second << std::endl;
-		// }
-		// // ----------------------------------------------------------------
-
+	
 
 		// Latest drift estimate.
 		{
@@ -1073,8 +1064,9 @@ void LiveSorter::computeClosestClusters(long currBatchNumSamples, long numSpikes
 
 	_CUDA_CALL(cudaMemcpy(d_spikeTemplates, spikeTemplates, numSpikes * sizeof(long), cudaMemcpyHostToDevice));
 	_CUDA_CALL(cudaMemcpy(d_spikeTimes, spikeTimes, numSpikes * sizeof(long), cudaMemcpyHostToDevice));
+	_CUDA_CALL(cudaMemcpy(d_amps, spikeAmplitudes, numSpikes * sizeof(float), cudaMemcpyHostToDevice));
 	_CUDA_CALL(cudaDeviceSynchronize());
-	
+
 	dim3 gridDim((numNearestChans + blockDim.x - 1) / blockDim.x,
 		(numSpikes + blockDim.y - 1) / blockDim.y);
 

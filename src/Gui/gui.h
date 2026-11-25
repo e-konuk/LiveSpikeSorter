@@ -81,7 +81,7 @@ public:
 	~Gui();
 
 	InputParameters gatherInputParameters();
-	void plotOutputs(sockaddr_in mainAddr, long m_lMaxScanWind, long m_lSpikeRateWindow, bool isDecoding);
+	void plotOutputs(sockaddr_in mainAddr, long m_lMaxScanWind, long m_lSpikeRateWindow);
 	void RenderIconWindow();
 
 	// Getters

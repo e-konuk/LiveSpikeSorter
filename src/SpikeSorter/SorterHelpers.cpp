@@ -59,7 +59,7 @@ cnpy::NpyArray getWhitening( std::string whiteningFile) {
 		//	throw std::runtime_error("loadWhiteningFile: Wrong number format");
 		if ( aWhitening.shape.size() != 2 )
 			throw std::runtime_error("loadWhiteningFile: Wrong dimensionality");
-		//if ( aWhitening.shape[0] != lC || aWhitening.shape[1] != lC ) // Uncomment when move to OnlineSpikes
+		//if ( aWhitening.shape[0] != lC || aWhitening.shape[1] != lC ) // Uncomment when move to LiveSorter
 			//throw std::runtime_error("loadWhiteningFile: Wrong size");
 	} catch (std::exception& e) {
 		std::cout << "Error while trying to load " << whiteningFile << ": " << e.what() << std::endl;

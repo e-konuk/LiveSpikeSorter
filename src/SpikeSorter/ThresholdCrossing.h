@@ -11,7 +11,7 @@
  //
  // Name			: ThresholdCrossing
  //
- // Description  : Main Class for Online Threshold Crossing
+ // Description  : Main Class for Live Threshold Crossing
  //
  // ------------------------------------------------------------------------------
 class ThresholdCrossing {
@@ -40,7 +40,7 @@ protected:
 	void    MoveFifo();
 
 	// =================================================================
-	// Online Processing Settings
+	// Live Processing Settings
 	// =================================================================
 
 	long   m_lMinWindow;
@@ -51,7 +51,7 @@ protected:
 	t_sglxconn S;
 
 	// =================================================================
-	/* Online Processing Parameters
+	/* Live Processing Parameters
 	 an 'm' before a parameter/variable indicates that is a member variable
 	 g indicates in graphics card memory
 	 the value behind the '_' indicates the type

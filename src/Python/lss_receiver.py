@@ -7,9 +7,7 @@
 3. Every sorted spike is printed as it arrives. Replace the print in the loop
    with your own closed-loop logic.
 
-The packet layout is defined in src/Networking/SpikeStream.h. For a fuller
-receiver (dropped-packet stats, latency, checking against spikeOutput.txt),
-see src/Python/lss_stream.py.
+The packet layout is defined in src/Networking/SpikeStream.h.
 """
 import socket
 import struct

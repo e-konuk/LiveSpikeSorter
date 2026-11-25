@@ -12,7 +12,7 @@ extern ImGuiID g_rasterDockNode;
 #include "CNPY/cnpy.h"          // ks_dshift.npy, for the drift-trace overlay
 #include "../Helpers/GuiHelpers.h"
 #include "../Networking/sorterParameters.h"
-#include "../Networking/onlineSpikesPayload.h"
+#include "../Networking/spikesPayload.h"
 #include "../Networking/NetworkHelpers.h"
 #include "../Helpers/RetrainSignal.h"   // g_retrainRequested (drift retrain feature)
 
@@ -36,7 +36,6 @@ OutputGuiTab::OutputGuiTab(std::string tabName, std::string ossInputDir, float r
 	m_fSampRate(0),
 	m_dChanpos(),
 	m_tCalcing(),
-	predictLabel(-1),
 	sock(Sock::UDP),
 	streamSampleCt(-1),
 	m_bNeurons(),
@@ -66,9 +65,8 @@ OutputGuiTab::~OutputGuiTab()
 }
 
 
-void OutputGuiTab::setupOutput(sockaddr_in mainAddr, long m_lMaxScanWind, long m_lSpikeRateWindow, bool isDecoding)
+void OutputGuiTab::setupOutput(sockaddr_in mainAddr, long m_lMaxScanWind, long m_lSpikeRateWindow)
 {
-	this->isDecoding = isDecoding; 
 	// Connect to the Main Server
 	std::cout << tabName << ": Sending GUI connect message..." << std::endl;
 	sendConnectMsg(&sock, mainAddr, _GUI);
@@ -125,7 +123,7 @@ void OutputGuiTab::setupOutput(sockaddr_in mainAddr, long m_lMaxScanWind, long m
 }
 
 void OutputGuiTab::UpdateEvents() {
-	OnlineSpikesPayload payload;
+	SpikesPayload payload;
 
 	static int binsize = BIN_SIZE;
 
@@ -145,16 +143,13 @@ void OutputGuiTab::UpdateEvents() {
 		payload.Templates = vTemplates;
 		payload.Amplitudes = vAmplitudes;
 	#else
-		payload = recvPayload<OnlineSpikesPayload>(&fm);
+		payload = recvPayload<SpikesPayload>(&fm);
 	#endif
 
 		{
 			std::lock_guard<std::mutex> lk(trialMutex);
-			predictLabel = payload.predictLabel;
 			label = payload.label;
 			nTrials = payload.nTrials;
-			nCorrect = payload.nCorrect;
-			confidence = payload.confidence;
 		}
 
 		streamSampleCt = payload.streamSampleCt;
@@ -816,31 +811,10 @@ void OutputGuiTab::displayTrialInfo(const ImVec2 windowCenter, bool &showTrialIn
 
 	ImGui::SetNextWindowClass(&plotWindowClass);
 	ImGui::Begin("Trial Info", &showTrialInfo);
-	if (!isDecoding) {
-		std::string txt = "# Trials: " + std::to_string(nTrials);
-		ImGui::Text(txt.c_str());
-		txt = "Label: " + std::to_string(label);
-		ImGui::Text(txt.c_str());
-	}
-	else {
-		std::string txt = "# Trials: " + std::to_string(nTrials) + ", # Correct: " + std::to_string(nCorrect);
-		ImGui::Text(txt.c_str());
-		txt = "Accuracy: " + std::to_string((float)nCorrect / (float)nTrials);
-		ImGui::Text(txt.c_str());
-		txt = "Label: " + std::to_string(label) + " ";
-		ImGui::Text(txt.c_str()); ImGui::SameLine();
-		if (predictLabel != -1) {
-			txt = "Predicted: " + std::to_string(predictLabel) + " ";
-			ImGui::Text(txt.c_str()); ImGui::SameLine();
-			if (predictLabel == label)
-				ImGui::TextColored(ImVec4(0.0f, 0.8f, 0.2f, 0.8f), "Correct!");
-			else
-				ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Incorrect!");
-			double conf = round(confidence * 10000) / 100;
-			txt = "The model had " + std::to_string(conf).substr(0, 5) + "%% confidence.";
-			ImGui::Text(txt.c_str());
-		}
-	}
+	std::string txt = "# Trials: " + std::to_string(nTrials);
+	ImGui::Text(txt.c_str());
+	txt = "Label: " + std::to_string(label);
+	ImGui::Text(txt.c_str());
 	ImGui::End();
 }
 
@@ -1017,10 +991,11 @@ void Neuron::plotFR(float sampRate, int binSize) {
 
 	// 8) Plot with fixed X limits
 	ImPlot::SetNextAxisLimits(ImAxis_X1, -float(history_s), 0.0f, ImPlotCond_Always);
-	ImPlot::BeginPlot("Firing Rate (sliding)", ImVec2(-1, 0));
-	ImPlot::SetupAxes("Time (s)", "Rate (Hz)");
-	ImPlot::PlotLine("FR", x.data(), y.data(), int(ptsToShow));
-	ImPlot::EndPlot();
+	if (ImPlot::BeginPlot("Firing Rate (sliding)", ImVec2(-1, 0))) {
+		ImPlot::SetupAxes("Time (s)", "Rate (Hz)");
+		ImPlot::PlotLine("FR", x.data(), y.data(), int(ptsToShow));
+		ImPlot::EndPlot();
+	}
 }
 
 
@@ -1035,9 +1010,10 @@ void Neuron::plotAutoCorr()
 	//Calculate how much to show
 	size_t ToShow = (history > autocorr.size()) ? autocorr.size() : history;
 
-	ImPlot::BeginPlot("Autocorrelation", ImVec2(-1, 0));
-	ImPlot::PlotLine("Autocorrelation", autocorr.data() + autocorr.size() - ToShow, ToShow);
-	ImPlot::EndPlot();
+	if (ImPlot::BeginPlot("Autocorrelation", ImVec2(-1, 0))) {
+		ImPlot::PlotLine("Autocorrelation", autocorr.data() + autocorr.size() - ToShow, ToShow);
+		ImPlot::EndPlot();
+	}
 }
 
 // calculate the Neurons within a specific range (default is 10 channels)
@@ -1086,9 +1062,10 @@ void Neuron::plotCrossCorr(int History, OutputGuiTab* outputGUI)
 			//go to end of data and decrement
 			plotArray += crosscorr[j].size() - toshow;
 
-			ImPlot::BeginPlot(std::string("Cross Correlation with Neuron ").append(num).c_str(), ImVec2(-1, 0));
-			ImPlot::PlotLine("Cross Correlation", plotArray, toshow);
-			ImPlot::EndPlot();
+			if (ImPlot::BeginPlot(std::string("Cross Correlation with Neuron ").append(num).c_str(), ImVec2(-1, 0))) {
+				ImPlot::PlotLine("Cross Correlation", plotArray, toshow);
+				ImPlot::EndPlot();
+			}
 		}
 
 	}
@@ -1114,9 +1091,10 @@ void Neuron::plotCrossCorr(int History, std::vector<std::vector<float> >& crossc
 			//go to end of data and decrement
 			plotArray += crosscorr[j].size() - toshow;
 
-			ImPlot::BeginPlot(std::string("Cross Correlation with Neuron ").append(num).c_str());
-			ImPlot::PlotLine("Cross Correlation", plotArray, toshow);
-			ImPlot::EndPlot();
+			if (ImPlot::BeginPlot(std::string("Cross Correlation with Neuron ").append(num).c_str())) {
+				ImPlot::PlotLine("Cross Correlation", plotArray, toshow);
+				ImPlot::EndPlot();
+			}
 		}
 	}
 }
@@ -1135,10 +1113,11 @@ void Neuron::plotAmplitude() {
 	//Calculate how much to show
 	size_t ToShow = min(history, amplitudes.size());
 
-	ImPlot::BeginPlot("Amplitude Plot", ImVec2(-1, 0));
-	ImPlot::SetupAxes("Spike occurrences", "Amplitude", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-	ImPlot::PlotLine("Measured Amplitudes", amplitudes.data() + amplitudes.size() - ToShow, ToShow);
-	ImPlot::EndPlot();
+	if (ImPlot::BeginPlot("Amplitude Plot", ImVec2(-1, 0))) {
+		ImPlot::SetupAxes("Spike occurrences", "Amplitude", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+		ImPlot::PlotLine("Measured Amplitudes", amplitudes.data() + amplitudes.size() - ToShow, ToShow);
+		ImPlot::EndPlot();
+	}
 }
 
 void Neuron::plotISI() {
@@ -1162,11 +1141,12 @@ void Neuron::plotISI() {
 	ImGui::SameLine();
 	setRange(range, 20, 500);
 
-	ImPlot::BeginPlot("ISI", ImVec2(-1, 0));
-	ImPlot::SetupAxes("Inter-Spike Interval (ms)", "Density", ImPlotAxisFlags_AutoFit);
-	ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
-	ImPlot::PlotHistogram("ISI", ISIs.data(), SampsToShow, bins, false, true, ImPlotRange(0, range));
-	ImPlot::EndPlot();
+	if (ImPlot::BeginPlot("ISI", ImVec2(-1, 0))) {
+		ImPlot::SetupAxes("Inter-Spike Interval (ms)", "Density", ImPlotAxisFlags_AutoFit);
+		ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
+		ImPlot::PlotHistogram("ISI", ISIs.data(), SampsToShow, bins, false, true, ImPlotRange(0, range));
+		ImPlot::EndPlot();
+	}
 }
 
 void Neuron::plotPSTH(std::vector<long> eventTimes, std::vector<int16_t> eventLabels, float sampRate, int bins, int binSize, int binSizeCts, int rangeCts, int negRange, int negRangeCts, int16_t label) { // TODO change function so PST only calculated when new event is added
@@ -1224,15 +1204,16 @@ void Neuron::plotPSTH(std::vector<long> eventTimes, std::vector<int16_t> eventLa
 
 	std::string plotTitle = (label == -1) ? "PSTH across all events" : "PSTH for label " + std::to_string(label);
 
-	ImPlot::BeginPlot(plotTitle.c_str(), ImVec2(-1, 0));
-	if (label == -1 || label == 0) // Currently all plots fit to the y axis of psth of label 0, but should be to whichever is max
-		ImPlot::SetupAxes("Peristimulus time (ms)", "Firing Rate", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
-	else
-		ImPlot::SetupAxis(ImAxis_X1, "Peristimulus time (ms)", ImPlotAxisFlags_AutoFit);
+	if (ImPlot::BeginPlot(plotTitle.c_str(), ImVec2(-1, 0))) {
+		if (label == -1 || label == 0) // Currently all plots fit to the y axis of psth of label 0, but should be to whichever is max
+			ImPlot::SetupAxes("Peristimulus time (ms)", "Firing Rate", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+		else
+			ImPlot::SetupAxis(ImAxis_X1, "Peristimulus time (ms)", ImPlotAxisFlags_AutoFit);
 
-	ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
-	ImPlot::PlotBars("PSTH", x.data(), PSTs.data(), bins, binSize);
-	ImPlot::EndPlot();
+		ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
+		ImPlot::PlotBars("PSTH", x.data(), PSTs.data(), bins, binSize);
+		ImPlot::EndPlot();
+	}
 }
 
 void Neuron::plotPSTHs(std::vector<long> eventTimes, std::vector<int16_t> eventLabels, float sampRate) {

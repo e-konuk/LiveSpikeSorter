@@ -92,10 +92,15 @@ void DataBinner::readInSpikes(const char* csvFilePath, const char* eventFilePath
 	FILE *fpLabel;
 	FILE *fpOut;
 
-	if ((fpIn = fopen(csvFilePath, "r")) == NULL)
+	if ((fpIn = fopen(csvFilePath, "r")) == NULL) {
 		fprintf(stderr, "Can't open input file %s\n", csvFilePath);
-	if ((fpLabel = fopen(eventFilePath, "r")) == NULL)
+		return;
+	}
+	if ((fpLabel = fopen(eventFilePath, "r")) == NULL) {
 		fprintf(stderr, "Can't open input file %s\n", eventFilePath);
+		fclose(fpIn);
+		return;
+	}
 	fpOut = fopen(outputFilePath, "w");
 
 	// Extract label and next label
@@ -106,7 +111,7 @@ void DataBinner::readInSpikes(const char* csvFilePath, const char* eventFilePath
 	long time, channel;
 	float amplitude; // Thrown away
 
-	while (fscanf(fpIn, "%20ld,%4ld,%f", &time, &channel, &amplitude) == 3)
+	while (fscanf(fpIn, "%20ld,%4ld,%f%*[^\n]", &time, &channel, &amplitude) == 3)
 	{
 		// If a window's length of time has passed since the time event, record dataWindow and extract a new label
 		if (eventTime + windowOffset < time) {

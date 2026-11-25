@@ -8,8 +8,6 @@
 #include "Decoder.h"
 #include "../Networking/NetworkHelpers.h"
 #include "../Helpers/TimeHelpers.h"
-#include "SVMModel.h"
-#include "RegressionModel.h"
 #include "../Gui/gui.h"
 #include <fstream>
 
@@ -22,17 +20,10 @@ Decoder::Decoder(std::vector<sockaddr_in> sorterImecAddrs, std::vector<sockaddr_
 	, nidqFm(&m_nidqSock)
 	, sorterNidqAddr(sorterNidqAddr)
 	, guiAddr(guiAddr)
-	, fileDataBinner(params.iWindowLength, params.iBinLength, params.iWindowOffset)
-	, streamDataBinner(params.iWindowLength, params.iBinLength, params.iWindowOffset)
-	, windowLength(params.iWindowLength) // Should just access dataBinner's variable
-	, isDecoding(params.bIsDecoding)
 	, readFromFile(params.bReadFromFile)
-	, isSendingFeedback(params.bIsSendingFeedback)
 	, streamSampleCt(0)
 	, guiEventStreamSampleCt(-1)
 	, nTrials(0)
-	, nCorrect(0)
-	, predictLabel(-1)
 	, guiLabel(-1)
 	, m_sdmActivitySubset(params.vSdmActivitySubset)
 	, m_sdmTriggerBinMs(params.sdmTriggerBinMs)
@@ -49,29 +40,7 @@ Decoder::Decoder(std::vector<sockaddr_in> sorterImecAddrs, std::vector<sockaddr_
 	imecRetransThread.detach();
 
 	//  ---- Read in output and log file ----
-	if (!isDecoding) {
-		m_fwOut.FileLoad(params.sSpikesFile);
-	}
-	else {
-		// Load file for storing binned spikes, to be used later by decoder
-		std::string binnedSpikesFile = params.sDecoderWorkFolder + "binnedSpikes.txt";
-		m_fwOut.FileLoad(binnedSpikesFile);
-
-		// Read from spikeOutput.txt, eventfile.txt, and store results into binnedSpikes.txt
-		fileDataBinner.readInSpikes(params.sSpikesFile.c_str(), params.sEventFile.c_str(), binnedSpikesFile.c_str(), &m_fwOut);
-		m_fwOut.FileClose();
-
-		// Initialize decoder model
-		model = std::make_unique<SKLearnModel>(SKLearnModel::LogisticRegression);
-
-		// Train the decoder model using binnedSpikes.txt, will produce scaledBinnedSpikes.txt as an intermediate file
-		std::cout << "Training scikit-learn LogisticRegression model.." << std::endl;
-		model->init(binnedSpikesFile, params.sDecoderWorkFolder);
-		std::cout << "..trained model!" << std::endl;
-
-		// Load the file where we will be writing decoder predictions
-		m_fwOut.FileLoad(params.sDecoderWorkFolder + "predictions.txt");
-	}
+	m_fwOut.FileLoad(params.sSpikesFile);
 
 	m_fwLog.FileLoad(params.sLogFile);
 
@@ -104,24 +73,9 @@ Decoder::~Decoder()
 	m_fwLog.FileClose();
 };
 
-void Decoder::decode(long samplecount) {
-	std::map<long, double> dataWindow = streamDataBinner.getDataWindow();
-	std::vector<double> probEstimates;
-
-	// Use data window to decode
-	probEstimates = model->predict(dataWindow, 0 , predictLabel);
-	m_fwOut.WritePrediction(0, predictLabel, probEstimates, 0, samplecount + recordingOffset);
-	std::cout << predictLabel << std::flush;
-
-	// Send feedback
-	if (isSendingFeedback) { // Could send other things besides the predict label if helpful.	
-		m_nidqSock.sendData(&predictLabel, sizeof(int), sorterNidqAddr);
-	}
-}
-
 void Decoder::spikeReceiver() {
-	// Process spikes online and decode if needed
-	OnlineSpikesPayload payload;
+	// Forward sorted spikes to the SDM processor and the GUI
+	SpikesPayload payload;
 	std::string serializedPayload;
 
 	std::unordered_set<long> sdmSubset;
@@ -142,13 +96,10 @@ void Decoder::spikeReceiver() {
 	m_sdmProcessor->sendHello(*m_sdmSock);
 
 	while (true) {
-		payload = recvPayload<OnlineSpikesPayload>(&imecFm); // from sorter
+		payload = recvPayload<SpikesPayload>(&imecFm); // from sorter
 
 		streamSampleCt = payload.streamSampleCt;
 		recordingOffset = payload.recordingOffset;
-
-		streamDataBinner.insert(payload.Times, payload.Templates);
-		streamDataBinner.updateTime(streamSampleCt);
 
 		if (currentBinIndex < 0) {
 			currentBinIndex = streamSampleCt / binSamples;
@@ -200,16 +151,6 @@ void Decoder::spikeReceiver() {
 		payload.eventStreamSampleCt = guiEventStreamSampleCt;
 		payload.label = guiLabel;
 		payload.nTrials = nTrials;
-
-		if (isDecoding) {	// If decoding, send prediction variables
-			// Compute predictLabel and store it into payload
-			decode(streamSampleCt);
-			payload.predictLabel = predictLabel;
-
-			if (isSendingFeedback) { // Could send other things besides the predict label if helpful.
-				m_nidqSock.sendData(&predictLabel, sizeof(int), sorterNidqAddr);
-			}
-		}
 
 		// Send spikesPayload to GUI
 		sendPayload(&imecFm, payload, guiAddr);

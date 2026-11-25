@@ -1,7 +1,6 @@
 ﻿#include <experimental/filesystem>
 
-#include "SpikeSorter/OnlineSpikes.h"
-#include "SpikeSorter/OnlineSpikesV2.h"
+#include "SpikeSorter/LiveSorter.h"
 #include "SpikeSorter/ThresholdCrossing.h"
 #include "Decoder/Decoder.h"
 #include "Gui/Gui.h"
@@ -19,7 +18,18 @@ std::atomic<bool> g_retrainRequested{ false };
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <sstream>
+
+// LSS_VERSION comes from the VERSION file via LiveSpikeSorter.vcxproj.
+#ifndef LSS_VERSION
+#define LSS_VERSION dev
+#endif
+#define LSS_STR2(x) #x
+#define LSS_STR(x) LSS_STR2(x)
+// run_lss.py reads this marker straight from the .exe bytes to check that the
+// exe matches the launcher, without starting it (the exe asks for elevation).
+static const char kVersionMarker[] = "LSS_VERSION=" LSS_STR(LSS_VERSION);
 
 //Check if we are not in the .exe folder. A bit ugly, but it works
 void exeFolderSetup() {
@@ -39,10 +49,26 @@ void exeFolderSetup() {
 	}
 }
 
+// Check if LSS fails on start
+[[noreturn]] static void exitOnSorterStartFailure(const std::string& why) {
+	const std::string msg = "The sorter could not start:\n\n" + why;
+	std::cerr << msg << std::endl;
+	MessageBoxA(NULL, msg.c_str(), "Live Spike Sorter", MB_OK | MB_ICONERROR);
+	std::exit(1);
+}
+
 void runOSSParallel(sockaddr_in mainAddr, InputParameters params, DataSocket* sharedSocket) {
+	std::unique_ptr<LiveSorter> oSpikeSorter;
 	try {
-		OnlineSpikesV2 oSpikeSorter(params, mainAddr, sharedSocket);
-		oSpikeSorter.runSpikeSorting();
+		oSpikeSorter = std::make_unique<LiveSorter>(params, mainAddr, sharedSocket);
+	}
+	catch (const std::exception& e) {
+		exitOnSorterStartFailure(std::string("GPU ") + std::to_string(params.uSelectedDevice) + ", " +
+			params.sInputFolder + "\n" + e.what());
+	}
+
+	try {
+		oSpikeSorter->runSpikeSorting();
 	}
 	catch (const std::exception& e) {
 		std::cerr << "Exception caught: " << e.what() << std::endl;
@@ -57,7 +83,7 @@ void runSorter(sockaddr_in mainAddr, InputParameters params, DataSocket** &mNC) 
 		cudaGetDeviceCount(&nGPUsDetected);
 		
 		if (nGPUsDetected == 0) {
-			throw std::runtime_error("No GPUs detected, cannot run Live Spike Sorter\n");
+			exitOnSorterStartFailure("No NVIDIA GPU detected.");
 		}
 
 		if (params.vSelectedDevices.size() == 0) {
@@ -65,15 +91,23 @@ void runSorter(sockaddr_in mainAddr, InputParameters params, DataSocket** &mNC) 
 			params.vSelectedDevices.push_back(0);
 		}
 
-		DataSocket* sharedSocket = new StreamDataSocket(params.sDataAccquisitionHost, 
-			params.uDataAccquisitionPort, 
-			params.iSubstream, 
-			params.iMaxScanWindow, 
-			params.iMinScanWindow, 
-			params.fImecSamplingRate, 
-			params.fNidqSamplingRate, 
-			params.iDownsampling
-		);
+		DataSocket* sharedSocket = nullptr;
+		try {
+			sharedSocket = new StreamDataSocket(params.sDataAccquisitionHost,
+				params.uDataAccquisitionPort,
+				params.iSubstream,
+				params.iMaxScanWindow,
+				params.iMinScanWindow,
+				params.fImecSamplingRate,
+				params.fNidqSamplingRate,
+				params.iDownsampling
+			);
+		}
+		catch (const std::exception& e) {
+			exitOnSorterStartFailure("Could not connect to SpikeGLX at " + params.sDataAccquisitionHost + ":" +
+				std::to_string(params.uDataAccquisitionPort) +
+				".\nIs SpikeGLX running, with its Command Server enabled on this address and port?\n\n" + e.what());
+		}
 
 		// starts spikeglx
 		sharedSocket->startRun();
@@ -401,6 +435,11 @@ InputParameters parseCmdArgs(int argc, char* argv[]) {
 //
 // ------------------------------------------------------------------------------
 int main(int argc, char* argv[]) {
+	if (argc > 1 && std::string(argv[1]) == "--version") {
+		std::cout << (kVersionMarker + sizeof("LSS_VERSION=") - 1) << std::endl;
+		return 0;
+	}
+
 	exeFolderSetup(); // TODO check if this is necessary
 
 	// Parse command line arguments and then autopopulate the input GUI with them
@@ -476,7 +515,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	// Start up GUI
-	gui.plotOutputs(mainAddr, params.iMaxScanWindow, params.iAvgWindowTime, params.bIsDecoding);
+	gui.plotOutputs(mainAddr, params.iMaxScanWindow, params.iAvgWindowTime);
 
 	// Wait for all sorter thread to finish
 	bool finishedMsg;

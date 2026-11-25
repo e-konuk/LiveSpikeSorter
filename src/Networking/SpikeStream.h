@@ -9,7 +9,7 @@
 // trimmed, times in SpikeGLX imec stream samples, cluster = final-cluster index
 // from closestCluster().
 //
-// Reference receiver: src/Python/lss_stream.py. Keep the two in lockstep.
+// Reference receiver: src/Python/lss_receiver.py. Keep the two in lockstep.
 
 #include <cstdint>
 #include <string>

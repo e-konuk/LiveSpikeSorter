@@ -174,22 +174,22 @@ def crop_kilosort_output(templates, whitening_mat, channel_map, channel_mask, te
     np.save(out_path / f"templateMap.npy", template_mask)
 
 def parse_bin_meta_file(filename):
+    """Parse a SpikeGLX .meta file into {key: value}.
+
+    Values are stripped strings, except nSavedChans, which is an int. Every key is
+    kept: cmr_groups.py reads imDatPrb_type and snsSaveChanSubset from this dict.
+    """
     metadata = { }
     with open(filename, 'r') as bin_meta_input:
-        n_channels = -1
         for line in bin_meta_input:
-            delimited = line.split('=')
-
-            if len(delimited) != 2:
+            key, sep, value = line.partition('=')
+            if not sep:
                 continue
+            metadata[key.strip()] = value.strip()
 
-            key = delimited[0]
-            value = delimited[1]
-
-            if key == "nSavedChans":
-                metadata["nSavedChans"] = int(value)
-
-    if "nSavedChans" not in metadata:
+    if "nSavedChans" in metadata:
+        metadata["nSavedChans"] = int(metadata["nSavedChans"])
+    else:
         print("Error occurred while parsing binary metadata file for nSavedChans.")
 
     return metadata

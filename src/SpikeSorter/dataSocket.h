@@ -15,7 +15,7 @@ typedef unsigned long long t_ull;
 
 enum streamTypes { NIDQ, OBX, IMEC }; // No OBX support currently
 
-// Parameters specific to each online spike sorter if parallelized
+// Parameters specific to each live spike sorter if parallelized
 struct OSSSpecificParams {
 	long lNChans;
 	std::vector<int> vImecChannels;

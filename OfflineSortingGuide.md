@@ -44,10 +44,23 @@ This installs Python (3.10 – 3.12), PyTorch with CUDA 11.8, Kilosort 4.0.13, a
 
 ### A5. DOWNLOAD LSS
 
-Download [`LiveSpikeSorter-win64.zip`](https://github.com/e-konuk/LiveSpikeSorter/releases/latest/download/LiveSpikeSorter-win64.zip) (the latest release; older versions are on the [Releases](https://github.com/e-konuk/LiveSpikeSorter/releases) page) and extract its files into `<repo>\bin\prebuilt\`, so that you have:
+Download [`LiveSpikeSorter-win64.zip`](https://github.com/e-konuk/LiveSpikeSorter/releases/latest/download/LiveSpikeSorter-win64.zip) (the latest release; older versions are on the [Releases](https://github.com/e-konuk/LiveSpikeSorter/releases) page) and extract its files into `<repo>\bin\prebuilt\`, so that you have the following file structure:
 
 ```
-<repo>\bin\prebuilt\LiveSpikeSorter.exe
+<repo>/
+├── ...
+├── bin/
+│   ├── prebuilt/
+│   │   ├── .gitkeep
+│   │   ├── libgcc_s_seh-1.dll      <- New
+│   │   ├── libstdc++-6.dll         <- New
+│   │   ├── libwinpthread-1.dll     <- New
+│   │   ├── LICENSE                 <- New
+│   │   ├── LiveSpikeSorter.exe     <- New
+│   │   └── SglxApi.dll             <- New
+│   └── build/
+│       └── .gitkeep
+└── ...
 ```
 ---
 

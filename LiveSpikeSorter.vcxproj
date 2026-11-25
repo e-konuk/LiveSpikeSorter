@@ -87,8 +87,8 @@
     <PostBuildEvent>
     <Command>echo copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"
 copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"
-echo copy "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll" "$(OutDir)"
-copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll" "$(OutDir)"</Command>
+echo copy "$(SolutionDir)External\sglx\*.dll" "$(OutDir)"
+copy /Y "$(SolutionDir)External\sglx\*.dll" "$(OutDir)"</Command>
     </PostBuildEvent>
 
     <CudaCompile>
@@ -129,8 +129,8 @@ copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll
     <PostBuildEvent>
     <Command>echo copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"
 copy "$(CudaToolkitBinDir)\cudart*.dll" "$(OutDir)"
-echo copy "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll" "$(OutDir)"
-copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll" "$(OutDir)"</Command>
+echo copy "$(SolutionDir)External\sglx\*.dll" "$(OutDir)"
+copy /Y "$(SolutionDir)External\sglx\*.dll" "$(OutDir)"</Command>
 </PostBuildEvent>
 
     <CudaCompile>
@@ -170,7 +170,6 @@ copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll
     <ClCompile Include="src\Gui\OutputGuiTab.cpp" />
     <ClCompile Include="src\Helpers\GuiHelpers.cpp" />
     <ClCompile Include="src\Networking\FragmentManager.cpp" />
-    <ClCompile Include="src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\SglxCppClient.cpp" />
     <ClCompile Include="src\SpikeSorter\dataSocket.cpp" />
     <ClCompile Include="src\Decoder\Decoder.cpp" />
     <ClCompile Include="src\Decoder\SdmProcessor.cpp" />
@@ -220,8 +219,6 @@ copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll
     <ClInclude Include="src\Gui\OutputGuiTab.h" />
     <ClInclude Include="src\Helpers\GuiHelpers.h" />
     <ClInclude Include="src\Networking\FragmentManager.h" />
-    <ClInclude Include="src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\SglxApi.h" />
-    <ClInclude Include="src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\SglxCppClient.h" />
     <ClInclude Include="src\SpikeSorter\dataSocket.h" />
     <ClInclude Include="src\Decoder\Decoder.h" />
     <ClInclude Include="src\Decoder\SdmProcessor.h" />
@@ -254,7 +251,6 @@ copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll
     <ResourceCompile Include="LiveSpikeSorter.rc" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="External\ImGUI\imgui.ini" />
     <None Include="README.md" />
     <None Include="src\Matlab\configFile384.m" />
     <None Include="src\Matlab\cropAndSort.m" />
@@ -282,7 +278,7 @@ copy /Y "$(SolutionDir)src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\*.dll
     <Font Include="External\ImGUI\fonts\Roboto-Medium.ttf" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="src\ExtraFiles\brain.ico" />
+    <Image Include="src\Gui\brain.ico" />
   </ItemGroup>
   <ItemGroup>
     <Library Include="External\sglx\libSglxApi.a" />

@@ -39,7 +39,6 @@
       <Filter>Helpers</Filter>
     </ClCompile>
     <ClCompile Include="External\sglx\SglxCppClient.cpp" />
-    <ClCompile Include="src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\SglxCppClient.cpp" />
     <ClCompile Include="src\SpikeSorter\mockStreamDataSocket.cpp" />
     <ClCompile Include="src\SpikeSorter\ThresholdCrossing.cpp" />
     <ClCompile Include="src\Networking\FragmentManager.cpp" />
@@ -107,8 +106,6 @@
     <ClInclude Include="External\tinyfiledialogs\tinyfiledialogs.h" />
     <ClInclude Include="External\sglx\SglxApi.h" />
     <ClInclude Include="External\sglx\SglxCppClient.h" />
-    <ClInclude Include="src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\SglxApi.h" />
-    <ClInclude Include="src\SpikeGLX-CPP-SDK-main\SpikeGLX-CPP-SDK-main\API\SglxCppClient.h" />
     <ClInclude Include="src\SpikeSorter\ThresholdCrossing.h" />
     <ClInclude Include="src\SpikeSorter\mockStreamDataSocket.h" />
     <ClInclude Include="src\Networking\FragmentManager.h" />
@@ -165,7 +162,6 @@
     <None Include="src\Matlab\cropSpikeSorterInput.m" />
     <None Include="src\Matlab\extractDecodeLabels.m" />
     <None Include="src\Matlab\neuropixPhase3A_kilosortChanMap.mat" />
-    <None Include="External\ImGUI\imgui.ini" />
     <None Include="src\Matlab\splitTrainTest.m" />
     <None Include="src\Matlab\cropBin.m" />
     <None Include="src\Matlab\DataBinner.m" />
@@ -186,7 +182,7 @@
     <Font Include="External\ImGUI\fonts\Roboto-Medium.ttf" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="src\ExtraFiles\brain.ico" />
+    <Image Include="src\Gui\brain.ico" />
   </ItemGroup>
   <ItemGroup>
     <Library Include="External\sglx\libSglxApi.a" />
